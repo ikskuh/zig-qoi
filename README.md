@@ -2,6 +2,8 @@
 
 A implementation of the [_Quite-OK-Image_](https://phoboslab.org/log/2021/11/qoi-fast-lossless-image-compression) format for Zig.
 
+![](design/logo.png)
+
 ## API
 
 Add `qoi.zig` to your Zig project as a package.
