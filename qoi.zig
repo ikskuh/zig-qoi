@@ -379,8 +379,8 @@ pub const Header = struct {
     }
 };
 
-test "decode zero.qoi" {
-    const src_data = @embedFile("../data/zero.qoi");
+test "decode qoi" {
+    const src_data = @embedFile("data/zero.qoi");
 
     var image = try decodeBuffer(std.testing.allocator, src_data);
     defer image.deinit(std.testing.allocator);
@@ -389,12 +389,27 @@ test "decode zero.qoi" {
     try std.testing.expectEqual(@as(u16, 512), image.height);
     try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
 
-    const dst_data = @embedFile("../data/zero.raw");
+    const dst_data = @embedFile("data/zero.raw");
+    try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
+}
+
+test "decode qoi file" {
+    var file = try std.fs.cwd().openFile("data/zero.qoi", .{});
+    defer file.close();
+
+    var image = try decodeStream(std.testing.allocator, file.reader());
+    defer image.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 512), image.width);
+    try std.testing.expectEqual(@as(u16, 512), image.height);
+    try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
+
+    const dst_data = @embedFile("data/zero.raw");
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
 test "encode qoi" {
-    const src_data = @embedFile("../data/zero.raw");
+    const src_data = @embedFile("data/zero.raw");
 
     var dst_data = try encodeBuffer(std.testing.allocator, ConstImage{
         .width = 512,
@@ -403,7 +418,7 @@ test "encode qoi" {
     });
     defer std.testing.allocator.free(dst_data);
 
-    const ref_data = @embedFile("../data/zero.qoi");
+    const ref_data = @embedFile("data/zero.qoi");
     try std.testing.expectEqualSlices(u8, ref_data, dst_data);
 }
 
@@ -414,7 +429,7 @@ test "random encode/decode" {
     const width = 251;
     const height = 49;
 
-    var rounds: usize = 64;
+    var rounds: usize = 512;
     while (rounds > 0) {
         rounds -= 1;
         var input_buffer: [width * height]Color = undefined;
@@ -444,7 +459,15 @@ test "input fuzzer. plz do not crash" {
     while (rounds > 0) {
         rounds -= 1;
         var input_buffer: [1 << 20]u8 = undefined;
-        rng.bytes(std.mem.sliceAsBytes(&input_buffer));
+        rng.bytes(&input_buffer);
+
+        if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header
+            std.mem.copy(u8, &input_buffer, &(Header{
+                .width = rng.int(u16),
+                .height = rng.int(u16),
+                .size = rng.int(u32),
+            }).encode());
+        }
 
         if (decodeBuffer(std.testing.allocator, &input_buffer)) |*image| {
             defer image.deinit(std.testing.allocator);
