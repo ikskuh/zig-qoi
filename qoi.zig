@@ -1,4 +1,5 @@
 const std = @import("std");
+const logger = std.log.scoped(.qoi);
 
 pub const Color = extern struct {
     r: u8,
@@ -65,10 +66,55 @@ pub fn decodeBuffer(allocator: *std.mem.Allocator, buffer: []const u8) DecodeErr
     return try decodeStream(allocator, stream.reader());
 }
 
+fn LimitedBufferedStream(comptime UnderlyingReader: type, comptime buffer_size: usize) type {
+    return struct {
+        const Self = @This();
+        const Error = UnderlyingReader.Error || error{EndOfStream};
+        const FifoType = std.fifo.LinearFifo(u8, std.fifo.LinearFifoBufferType{ .Static = buffer_size });
+
+        unbuffered_reader: UnderlyingReader,
+        limit: usize,
+        fifo: FifoType = FifoType.init(),
+
+        pub const Reader = std.io.Reader(*Self, Error, read);
+
+        pub fn reader(self: *Self) Reader {
+            return Reader{ .context = self };
+        }
+
+        pub fn read(self: *Self, dest: []u8) Error!usize {
+            var dest_index: usize = 0;
+            while (dest_index < dest.len) {
+                const written = self.fifo.read(dest[dest_index..]);
+                if (written == 0) {
+                    // fifo empty, fill it
+                    const writable = self.fifo.writableSlice(0);
+                    std.debug.assert(writable.len > 0);
+
+                    if (self.limit == 0)
+                        return error.EndOfStream;
+
+                    const max_data = std.math.min(self.limit, writable.len);
+                    const n = try self.unbuffered_reader.read(writable[0..max_data]);
+                    if (n == 0) {
+                        // reading from the unbuffered stream returned nothing
+                        // so we have nothing left to read.
+                        return dest_index;
+                    }
+                    self.limit -= n;
+                    self.fifo.update(n);
+                }
+                dest_index += written;
+            }
+            return dest.len;
+        }
+    };
+}
+
 /// Decodes a QOI stream and returns the decoded image.
-pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) (DecodeError || @TypeOf(reader).Error)!Image {
+pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (DecodeError || @TypeOf(unbuffered_reader).Error)!Image {
     var header_data: [Header.size]u8 = undefined;
-    try reader.readNoEof(&header_data);
+    try unbuffered_reader.readNoEof(&header_data);
     const header = Header.decode(header_data) catch return error.InvalidData;
 
     const size = @as(u32, header.width) * @as(u32, header.height);
@@ -80,19 +126,32 @@ pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) (DecodeError
     };
     errdefer allocator.free(img.pixels);
 
+    var limited_stream = LimitedBufferedStream(@TypeOf(unbuffered_reader), 8192){
+        .unbuffered_reader = unbuffered_reader,
+        .limit = header.size,
+    };
+    var reader = limited_stream.reader();
+
+    // Micro-Benchmark
+    // 2955087 ns with unbuffered reader, Debug
+    // 1047996 ns with buffered reader, Debug
+    // 3021951 ns with unbuffered reader, ReleaseFast
+    //  144836 ns with buffered reader, ReleaseFast
+
     var current_color = Color{ .r = 0, .g = 0, .b = 0, .a = 0xFF };
     var color_lut = std.mem.zeroes([64]Color);
 
     var index: usize = 0;
     while (index < img.pixels.len) {
         var byte = reader.readByte() catch |err| {
-            std.log.err("failed to read byte from qoi stream at ({},{}): {s}", .{
-                index % img.width,
-                index / img.width,
-                @errorName(err),
-            });
-            break;
-            // return err;
+            if (@import("builtin").mode == .Debug) {
+                logger.err("failed to read byte from qoi stream at ({},{}): {s}", .{
+                    index % img.width,
+                    index / img.width,
+                    @errorName(err),
+                });
+            }
+            return err;
         };
 
         var new_color = current_color;
