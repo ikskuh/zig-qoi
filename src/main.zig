@@ -406,3 +406,51 @@ test "encode qoi" {
     const ref_data = @embedFile("../data/zero.qoi");
     try std.testing.expectEqualSlices(u8, ref_data, dst_data);
 }
+
+test "random encode/decode" {
+    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    const rng = rng_engine.random();
+
+    const width = 251;
+    const height = 49;
+
+    var rounds: usize = 64;
+    while (rounds > 0) {
+        rounds -= 1;
+        var input_buffer: [width * height]Color = undefined;
+        rng.bytes(std.mem.sliceAsBytes(&input_buffer));
+
+        var encoded_data = try encodeBuffer(std.testing.allocator, ConstImage{
+            .width = width,
+            .height = height,
+            .pixels = &input_buffer,
+        });
+        defer std.testing.allocator.free(encoded_data);
+
+        var image = try decodeBuffer(std.testing.allocator, encoded_data);
+        defer image.deinit(std.testing.allocator);
+
+        try std.testing.expectEqual(@as(u16, width), image.width);
+        try std.testing.expectEqual(@as(u16, height), image.height);
+        try std.testing.expectEqualSlices(Color, &input_buffer, image.pixels);
+    }
+}
+
+test "input fuzzer. plz do not crash" {
+    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    const rng = rng_engine.random();
+
+    var rounds: usize = 512;
+    while (rounds > 0) {
+        rounds -= 1;
+        var input_buffer: [1 << 20]u8 = undefined;
+        rng.bytes(std.mem.sliceAsBytes(&input_buffer));
+
+        if (decodeBuffer(std.testing.allocator, &input_buffer)) |*image| {
+            defer image.deinit(std.testing.allocator);
+        } else |err| {
+            // error is also okay, just no crashes plz
+            err catch {};
+        }
+    }
+}
