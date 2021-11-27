@@ -64,7 +64,7 @@ Benchmark [4082/4096] Decoding time for 67076 => 1048576 bytes: 371.522us
        0,105006000 seconds sys
 ```
 
-Also, running in the [benchmark dataset](https://phoboslab.org/files/qoibench/) of the original author, it yielded the [following data](data/benchmark.csv):
+Also, running the [benchmark dataset](https://phoboslab.org/files/qoibench/) of the original author, it yielded the [following data](data/benchmark.csv):
 
 ```
 Number of total images:             185
