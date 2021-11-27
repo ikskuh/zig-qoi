@@ -1,0 +1,6 @@
+[submodule "vendor/zig-args"]
+	path = vendor/zig-args
+	url = https://github.com/MasterQ32/zig-args
+[submodule "vendor/zigimg"]
+	path = vendor/zigimg
+	url = https://github.com/zigimg/zigimg

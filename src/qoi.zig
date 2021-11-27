@@ -18,15 +18,17 @@ pub const Color = extern struct {
 
 /// A QOI image with RGBA pixels.
 pub const Image = struct {
-    width: u16,
-    height: u16,
+    width: u32,
+    height: u32,
     pixels: []Color,
+    colorspace: Colorspace,
 
     pub fn asConst(self: Image) ConstImage {
         return ConstImage{
             .width = self.width,
             .height = self.height,
             .pixels = self.pixels,
+            .colorspace = self.colorspace,
         };
     }
 
@@ -38,9 +40,10 @@ pub const Image = struct {
 
 /// A QOI image with RGBA pixels.
 pub const ConstImage = struct {
-    width: u16,
-    height: u16,
+    width: u32,
+    height: u32,
     pixels: []const Color,
+    colorspace: Colorspace,
 };
 
 /// Returns true if `bytes` appear to contain a valid QOI image.
@@ -56,10 +59,6 @@ pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
 /// Decodes a buffer containing a QOI image and returns the decoded image.
 pub fn decodeBuffer(allocator: *std.mem.Allocator, buffer: []const u8) DecodeError!Image {
     if (buffer.len < Header.size)
-        return error.InvalidData;
-
-    const header = Header.decode(buffer[0..12].*) catch return error.InvalidData;
-    if (buffer.len != Header.size + header.size)
         return error.InvalidData;
 
     var stream = std.io.fixedBufferStream(buffer);
@@ -112,47 +111,28 @@ fn LimitedBufferedStream(comptime UnderlyingReader: type, comptime buffer_size: 
 }
 
 /// Decodes a QOI stream and returns the decoded image.
-pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (DecodeError || @TypeOf(unbuffered_reader).Error)!Image {
+pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) (DecodeError || @TypeOf(reader).Error)!Image {
     var header_data: [Header.size]u8 = undefined;
-    try unbuffered_reader.readNoEof(&header_data);
+    try reader.readNoEof(&header_data);
     const header = Header.decode(header_data) catch return error.InvalidData;
 
-    const size = @as(u32, header.width) * @as(u32, header.height);
+    const size_raw = @as(u64, header.width) * @as(u64, header.height);
+    const size = std.math.cast(usize, size_raw) catch return error.OutOfMemory;
 
     var img = Image{
         .width = header.width,
         .height = header.height,
         .pixels = try allocator.alloc(Color, size),
+        .colorspace = header.colorspace,
     };
     errdefer allocator.free(img.pixels);
-
-    var limited_stream = LimitedBufferedStream(@TypeOf(unbuffered_reader), 8192){
-        .unbuffered_reader = unbuffered_reader,
-        .limit = header.size,
-    };
-    var reader = limited_stream.reader();
-
-    // Micro-Benchmark
-    // 2955087 ns with unbuffered reader, Debug
-    // 1047996 ns with buffered reader, Debug
-    // 3021951 ns with unbuffered reader, ReleaseFast
-    //  144836 ns with buffered reader, ReleaseFast
 
     var current_color = Color{ .r = 0, .g = 0, .b = 0, .a = 0xFF };
     var color_lut = std.mem.zeroes([64]Color);
 
     var index: usize = 0;
     while (index < img.pixels.len) {
-        var byte = reader.readByte() catch |err| {
-            if (@import("builtin").mode == .Debug) {
-                logger.err("failed to read byte from qoi stream at ({},{}): {s}", .{
-                    index % img.width,
-                    index / img.width,
-                    @errorName(err),
-                });
-            }
-            return err;
-        };
+        var byte = try reader.readByte();
 
         var new_color = current_color;
         var count: usize = 1;
@@ -175,9 +155,9 @@ pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (
             // std.debug.print("read run of {} pixels at +{}\n", .{ count, reader.context.getPos() });
         } else if (hasPrefix(byte, u2, 0b10)) { // QOI_DIFF_8
 
-            const diff_r = @as(i8, @truncate(u2, byte >> 4)) - 1;
-            const diff_g = @as(i8, @truncate(u2, byte >> 2)) - 1;
-            const diff_b = @as(i8, @truncate(u2, byte >> 0)) - 1;
+            const diff_r = unmapRange2(byte >> 4);
+            const diff_g = unmapRange2(byte >> 2);
+            const diff_b = unmapRange2(byte >> 0);
 
             // std.debug.print("read delta8({},{},{}) at +{}\n", .{ diff_r, diff_g, diff_b, reader.context.getPos() });
 
@@ -188,9 +168,9 @@ pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (
 
             const second = try reader.readByte();
 
-            const diff_r = @as(i8, @truncate(u5, byte)) - 15;
-            const diff_g = @as(i8, @truncate(u4, second >> 4)) - 7;
-            const diff_b = @as(i8, @truncate(u4, second >> 0)) - 7;
+            const diff_r = unmapRange5(byte);
+            const diff_g = unmapRange4(second >> 4);
+            const diff_b = unmapRange4(second >> 0);
 
             // std.debug.print("read delta16({},{},{}) at +{}\n", .{ diff_r, diff_g, diff_b, reader.context.getPos() });
 
@@ -203,10 +183,10 @@ pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (
 
             const all = (@as(u24, byte) << 16) | (@as(u24, second) << 8) | (@as(u24, third) << 0);
 
-            const diff_r = @as(i8, @truncate(u5, all >> 15)) - 15;
-            const diff_g = @as(i8, @truncate(u5, all >> 10)) - 15;
-            const diff_b = @as(i8, @truncate(u5, all >> 5)) - 15;
-            const diff_a = @as(i8, @truncate(u5, all >> 0)) - 15;
+            const diff_r = unmapRange5(all >> 15);
+            const diff_g = unmapRange5(all >> 10);
+            const diff_b = unmapRange5(all >> 5);
+            const diff_a = unmapRange5(all >> 0);
 
             // std.debug.print("read delta24({},{},{},{}) at +{}\n", .{ diff_r, diff_g, diff_b, diff_a, reader.context.getPos() });
 
@@ -238,9 +218,14 @@ pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (
             unreachable;
         }
 
+        // this will happen when a file has an invalid run length
+        // and we would decode more pixels than there are in the image.
+        if (index + count > img.pixels.len) {
+            return error.InvalidData;
+        }
+
         while (count > 0) {
             count -= 1;
-
             img.pixels[index] = new_color;
             index += 1;
         }
@@ -252,12 +237,20 @@ pub fn decodeStream(allocator: *std.mem.Allocator, unbuffered_reader: anytype) (
     return img;
 }
 
-pub const EncodeError = error{ OutOfMemory, ImageTooLarge, EndOfStream };
+pub const EncodeError = error{};
 
-/// Encodes a given `image` into a QOI file.
-/// Requires allocation to save the stream, cannot use Writer interface as we need to be able
-/// to seek to the start.
-pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) EncodeError![]u8 {
+/// Encodes a given `image` into a QOI buffer.
+pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
+    var destination_buffer = std.ArrayList(u8).init(allocator);
+    defer destination_buffer.deinit();
+
+    try encodeStream(image, destination_buffer.writer());
+
+    return destination_buffer.toOwnedSlice();
+}
+
+/// Encodes a given `image` into a QOI buffer.
+pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(writer).Error)!void {
     const padding_size = 4; // arbitrary 4 bytes at the end of the file
 
     const QOI_INDEX: u8 = 0x00; // 00xxxxxx
@@ -268,15 +261,16 @@ pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) EncodeErro
     const QOI_DIFF_24: u8 = 0xe0; // 1110xxxx
     const QOI_COLOR: u8 = 0xf0; // 1111xxxx
 
-    var destination_buffer = std.ArrayList(u8).init(allocator);
-    defer destination_buffer.deinit();
-
-    var writer = destination_buffer.writer();
+    var format = for (image.pixels) |pix| {
+        if (pix.a != 0xFF)
+            break Format.rgba;
+    } else Format.rgb;
 
     var header = Header{
         .width = image.width,
         .height = image.height,
-        .size = undefined,
+        .format = format,
+        .colorspace = .sRGB,
     };
     try writer.writeAll(&header.encode());
 
@@ -374,32 +368,36 @@ pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) EncodeErro
     }
 
     try writer.writeByteNTimes(0, padding_size);
-
-    // re-encode the header, but now with the correct size
-    header.size = std.math.cast(u32, destination_buffer.items.len - Header.size) catch return error.ImageTooLarge;
-    std.mem.copy(u8, destination_buffer.items, &header.encode());
-
-    return destination_buffer.toOwnedSlice();
 }
 
 fn mapRange2(val: i9) u8 {
-    return @intCast(u2, val + 1);
+    return @intCast(u2, val + 2);
 }
 fn mapRange4(val: i9) u8 {
-    return @intCast(u4, val + 7);
+    return @intCast(u4, val + 8);
 }
 fn mapRange5(val: i9) u8 {
-    return @intCast(u5, val + 15);
+    return @intCast(u5, val + 16);
+}
+
+fn unmapRange2(val: u32) i2 {
+    return @intCast(i2, @as(i8, @truncate(u2, val)) - 2);
+}
+fn unmapRange4(val: u32) i4 {
+    return @intCast(i4, @as(i8, @truncate(u4, val)) - 8);
+}
+fn unmapRange5(val: u32) i5 {
+    return @intCast(i5, @as(i8, @truncate(u5, val)) - 16);
 }
 
 fn inRange2(val: i9) bool {
-    return (val >= -1) and (val <= 2);
+    return (val >= -2) and (val <= 1);
 }
 fn inRange4(val: i9) bool {
-    return (val >= -7) and (val <= 8);
+    return (val >= -8) and (val <= 7);
 }
 fn inRange5(val: i9) bool {
-    return (val >= -15) and (val <= 16);
+    return (val >= -16) and (val <= 15);
 }
 
 fn add8(dst: *u8, diff: i8) void {
@@ -411,44 +409,101 @@ fn hasPrefix(value: u8, comptime T: type, prefix: T) bool {
 }
 
 pub const Header = struct {
-    const size = 12;
+    const size = 14;
     const correct_magic = [4]u8{ 'q', 'o', 'i', 'f' };
 
-    width: u16, // big endian
-    height: u16, // big endian
-    size: u32, // big endian
+    width: u32,
+    height: u32,
+    format: Format,
+    colorspace: Colorspace,
 
     fn decode(buffer: [size]u8) !Header {
         if (!std.mem.eql(u8, buffer[0..4], &correct_magic))
             return error.InvalidMagic;
         return Header{
-            .width = std.mem.readIntBig(u16, buffer[4..6]),
-            .height = std.mem.readIntBig(u16, buffer[6..8]),
-            .size = std.mem.readIntBig(u32, buffer[8..12]),
+            .width = std.mem.readIntBig(u32, buffer[4..8]),
+            .height = std.mem.readIntBig(u32, buffer[8..12]),
+            .format = try std.meta.intToEnum(Format, buffer[12]),
+            .colorspace = Colorspace.decode(buffer[13]),
         };
     }
 
     fn encode(header: Header) [size]u8 {
         var result: [size]u8 = undefined;
         std.mem.copy(u8, result[0..4], &correct_magic);
-        std.mem.writeIntBig(u16, result[4..6], header.width);
-        std.mem.writeIntBig(u16, result[6..8], header.height);
-        std.mem.writeIntBig(u32, result[8..12], header.size);
+        std.mem.writeIntBig(u32, result[4..8], header.width);
+        std.mem.writeIntBig(u32, result[8..12], header.height);
+        result[12] = @enumToInt(header.format);
+        result[13] = header.colorspace.encode();
         return result;
     }
 };
 
+pub const Colorspace = union(enum) {
+    /// sRGB color, linear alpha
+    sRGB,
+
+    /// Every channel is linear
+    linear,
+
+    /// Each channel has a different configuration
+    per_channel: Explicit,
+
+    pub const Explicit = struct {
+        r: Value,
+        g: Value,
+        b: Value,
+        a: Value,
+    };
+
+    pub const Value = enum(u1) {
+        sRGB = 0,
+        linear = 1,
+    };
+
+    pub fn encode(self: Colorspace) u8 {
+        return switch (self) {
+            .sRGB => 0x01,
+            .linear => 0x0F,
+            .per_channel => |val| @as(u8, @enumToInt(val.r)) << 3 |
+                @as(u8, @enumToInt(val.g)) << 2 |
+                @as(u8, @enumToInt(val.b)) << 1 |
+                @as(u8, @enumToInt(val.a)) << 0,
+        };
+    }
+
+    pub fn decode(val: u8) Colorspace {
+        return switch (val & 0x0F) {
+            0x01 => return .sRGB,
+            0x0F => return .linear,
+            else => return Colorspace{
+                .per_channel = .{
+                    .r = @intToEnum(Value, @truncate(u1, (val >> 3))),
+                    .g = @intToEnum(Value, @truncate(u1, (val >> 2))),
+                    .b = @intToEnum(Value, @truncate(u1, (val >> 1))),
+                    .a = @intToEnum(Value, @truncate(u1, (val >> 0))),
+                },
+            },
+        };
+    }
+};
+
+pub const Format = enum(u8) {
+    rgb = 3,
+    rgba = 4,
+};
+
 test "decode qoi" {
-    const src_data = @embedFile("data/zero.qoi");
+    const src_data = @embedFile("../data/zero.qoi");
 
     var image = try decodeBuffer(std.testing.allocator, src_data);
     defer image.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(u16, 512), image.width);
-    try std.testing.expectEqual(@as(u16, 512), image.height);
+    try std.testing.expectEqual(@as(u32, 512), image.width);
+    try std.testing.expectEqual(@as(u32, 512), image.height);
     try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
 
-    const dst_data = @embedFile("data/zero.raw");
+    const dst_data = @embedFile("../data/zero.raw");
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
@@ -459,25 +514,26 @@ test "decode qoi file" {
     var image = try decodeStream(std.testing.allocator, file.reader());
     defer image.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(u16, 512), image.width);
-    try std.testing.expectEqual(@as(u16, 512), image.height);
+    try std.testing.expectEqual(@as(u32, 512), image.width);
+    try std.testing.expectEqual(@as(u32, 512), image.height);
     try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
 
-    const dst_data = @embedFile("data/zero.raw");
+    const dst_data = @embedFile("../data/zero.raw");
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
 test "encode qoi" {
-    const src_data = @embedFile("data/zero.raw");
+    const src_data = @embedFile("../data/zero.raw");
 
     var dst_data = try encodeBuffer(std.testing.allocator, ConstImage{
         .width = 512,
         .height = 512,
         .pixels = std.mem.bytesAsSlice(Color, src_data),
+        .colorspace = .sRGB,
     });
     defer std.testing.allocator.free(dst_data);
 
-    const ref_data = @embedFile("data/zero.qoi");
+    const ref_data = @embedFile("../data/zero.qoi");
     try std.testing.expectEqualSlices(u8, ref_data, dst_data);
 }
 
@@ -498,14 +554,15 @@ test "random encode/decode" {
             .width = width,
             .height = height,
             .pixels = &input_buffer,
+            .colorspace = if (rng.boolean()) Colorspace.sRGB else Colorspace.linear,
         });
         defer std.testing.allocator.free(encoded_data);
 
         var image = try decodeBuffer(std.testing.allocator, encoded_data);
         defer image.deinit(std.testing.allocator);
 
-        try std.testing.expectEqual(@as(u16, width), image.width);
-        try std.testing.expectEqual(@as(u16, height), image.height);
+        try std.testing.expectEqual(@as(u32, width), image.width);
+        try std.testing.expectEqual(@as(u32, height), image.height);
         try std.testing.expectEqualSlices(Color, &input_buffer, image.pixels);
     }
 }
@@ -517,18 +574,24 @@ test "input fuzzer. plz do not crash" {
     var rounds: usize = 512;
     while (rounds > 0) {
         rounds -= 1;
-        var input_buffer: [1 << 20]u8 = undefined;
+        var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
         rng.bytes(&input_buffer);
 
         if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header
             std.mem.copy(u8, &input_buffer, &(Header{
                 .width = rng.int(u16),
                 .height = rng.int(u16),
-                .size = rng.int(u32),
+                .format = rng.enumValue(Format),
+                .colorspace = .{ .per_channel = .{
+                    .r = rng.enumValue(Colorspace.Value),
+                    .g = rng.enumValue(Colorspace.Value),
+                    .b = rng.enumValue(Colorspace.Value),
+                    .a = rng.enumValue(Colorspace.Value),
+                } },
             }).encode());
         }
 
-        if (decodeBuffer(std.testing.allocator, &input_buffer)) |*image| {
+        if (decodeStream(std.testing.allocator, &input_buffer)) |*image| {
             defer image.deinit(std.testing.allocator);
         } else |err| {
             // error is also okay, just no crashes plz

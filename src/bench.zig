@@ -2,13 +2,17 @@ const std = @import("std");
 const qoi = @import("qoi.zig");
 
 const total_rounds = 4096;
-const test_encoder = true;
 
 pub fn main() !void {
+    try perform(true);
+    try perform(false);
+}
+
+fn perform(comptime test_encoder: bool) !void {
     const allocator = std.heap.c_allocator;
 
-    const source_data = @embedFile("data/zero.qoi");
-    const ref_data = @embedFile("data/zero.raw");
+    const source_data = @embedFile("../data/zero.qoi");
+    const ref_data = @embedFile("../data/zero.raw");
 
     var progress = std.Progress{};
 
@@ -30,6 +34,7 @@ pub fn main() !void {
                 .width = 512,
                 .height = 512,
                 .pixels = std.mem.bytesAsSlice(qoi.Color, ref_data),
+                .colorspace = .sRGB,
             });
             defer allocator.free(memory);
 
@@ -57,9 +62,17 @@ pub fn main() !void {
         benchmark.completeOne();
     }
 
-    std.debug.print("Decoding time for {} => {} bytes: {}\n", .{
-        source_data.len,
-        ref_data.len,
-        std.fmt.fmtDuration(total_time / total_rounds),
-    });
+    if (test_encoder) {
+        std.debug.print("Encoding time for {} => {} bytes: {}\n", .{
+            ref_data.len,
+            source_data.len,
+            std.fmt.fmtDuration(total_time / total_rounds),
+        });
+    } else {
+        std.debug.print("Decoding time for {} => {} bytes: {}\n", .{
+            source_data.len,
+            ref_data.len,
+            std.fmt.fmtDuration(total_time / total_rounds),
+        });
+    }
 }
