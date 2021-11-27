@@ -66,6 +66,18 @@ Benchmark [4082/4096] Decoding time for 67076 => 1048576 bytes: 371.522us
        0,105006000 seconds sys
 ```
 
+Also, running in the [benchmark dataset](https://phoboslab.org/files/qoibench/) of the original author, it yielded the [following data](data/benchmark.csv):
+
+```
+Number of total images:            185
+Average PNG Compression:           30.44%
+Average QOI Compression:           35.62%
+Average Compression Rate (MB/s):   288.9701539
+Average Decompression Rate (MB/s): 691.0531578
+```
+
+[See also the original analysis on Google Docs](https://docs.google.com/spreadsheets/d/1guTm4A2TxFzxeB6MRWbCmfidJu3S2iv-S3OM_sOo_4Q/edit?usp=sharing)
+
 ## Contribution
 
 Run the test suite like this:

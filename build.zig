@@ -28,16 +28,26 @@ pub fn build(b: *std.build.Builder) void {
         .name = "args",
         .path = .{ .path = "vendor/zig-args/args.zig" },
     });
-    benchmark.addPackage(.{
+    benchmark.linkLibC();
+    benchmark.install();
+
+    const benchmark_files = b.addExecutable("qoi-bench-files", "src/bench-files.zig");
+    benchmark_files.setBuildMode(mode);
+    benchmark_files.setTarget(target);
+    benchmark_files.addPackage(.{
+        .name = "args",
+        .path = .{ .path = "vendor/zig-args/args.zig" },
+    });
+    benchmark_files.addPackage(.{
         .name = "qoi",
         .path = .{ .path = "src/qoi.zig" },
     });
-    benchmark.addPackage(.{
+    benchmark_files.addPackage(.{
         .name = "img",
         .path = .{ .path = "vendor/zigimg/zigimg.zig" },
     });
-    benchmark.linkLibC();
-    benchmark.install();
+    benchmark_files.linkLibC();
+    benchmark_files.install();
 
     const test_step = b.step("test", "Runs the test suite.");
     {
