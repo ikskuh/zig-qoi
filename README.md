@@ -26,8 +26,6 @@ Everything specified in https://github.com/phoboslab/qoi/issues/37 is implemente
 
 ## Performance
 
-This implementation uses a buffered reader in `decodeStream` which does not read after the QOI file end. This buffered reader allows high performance even when passing an unbuffered file reader directly.
-
 On my machine (AMD Ryzen 7 3700U), i did a small benchmark with decoding `bench.zig`, which will decode `zero.qoi`:
 
 | Build Mode   | QOI Bytes   | Raw Bytes      | Encoding Time | Decoding Time |
@@ -69,11 +67,15 @@ Benchmark [4082/4096] Decoding time for 67076 => 1048576 bytes: 371.522us
 Also, running in the [benchmark dataset](https://phoboslab.org/files/qoibench/) of the original author, it yielded the [following data](data/benchmark.csv):
 
 ```
-Number of total images:            185
-Average PNG Compression:           30.44%
-Average QOI Compression:           35.62%
-Average Compression Rate (MB/s):   288.9701539
-Average Decompression Rate (MB/s): 691.0531578
+Number of total images:             185
+Average PNG Compression:             30.44%
+Average QOI Compression:             35.62%
+Average Compression Rate (MB/s):    288.97
+Minimal Compression Rate (MB/s):    116.21
+Maximum Compression Rate (MB/s):    791.38
+Average Decompression Rate (MB/s):  691.05
+Maximum Decompression Rate (MB/s):  208.44
+Maximum Deompression Rate (MB/s):  8421.62
 ```
 
 [See also the original analysis on Google Docs](https://docs.google.com/spreadsheets/d/1guTm4A2TxFzxeB6MRWbCmfidJu3S2iv-S3OM_sOo_4Q/edit?usp=sharing)
@@ -94,3 +96,14 @@ Run the benchmark like this:
 Benchmark [4096/4096] Encoding time for 1048576 => 67076 bytes: 16.649ms
 Benchmark [4095/4096] Decoding time for 67076 => 1048576 bytes: 5.681ms
 ```
+
+To run the benchmark for batch files, run this:
+
+```sh-console
+[user@host zig-qoi]$ zig build install && ./zig-out/bin/qoi-bench-files $(folder_a) $(folder_b) ...
+File Name       Width   Height  Total Raw Bytes  Total PNG Bytes PNG Compression  Total QOI Bytes  QOI Compression  QOI to PNG          Decode Time (ns)  Encode Time (ns)
+data/zero.png   512     512     1048576          80591           0.08             67076            0.06             0.8323013782501221  5628360           14499346
+total sum       0       0       1048576          80591           0.08             67076            0.06             0.8323013782501221  5628360           14499346
+```
+
+Pass as many folders you like to the benchmarking tool. It will render a CSV file on the `stderr`.

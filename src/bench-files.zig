@@ -19,7 +19,7 @@ pub fn main() !u8 {
     var total_encode_time: u64 = 0;
 
     std.debug.print(
-        "File Name\tWidth\tHeight\tTotal Raw Bytes\tTotal PNG Bytes\tPNG Compression\tTotal QOI Bytes\tQOI Compression\tDecode Time (ns)\tEncode Time (ns)\n",
+        "File Name\tWidth\tHeight\tTotal Raw Bytes\tTotal PNG Bytes\tPNG Compression\tTotal QOI Bytes\tQOI Compression\tQOI to PNG\tDecode Time (ns)\tEncode Time (ns)\n",
         .{},
     );
 
