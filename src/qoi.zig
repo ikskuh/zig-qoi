@@ -32,7 +32,7 @@ pub const Image = struct {
         };
     }
 
-    pub fn deinit(self: *Image, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: *Image, allocator: std.mem.Allocator) void {
         allocator.free(self.pixels);
         self.* = undefined;
     }
@@ -57,7 +57,7 @@ pub fn isQOI(bytes: []const u8) bool {
 pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
 
 /// Decodes a buffer containing a QOI image and returns the decoded image.
-pub fn decodeBuffer(allocator: *std.mem.Allocator, buffer: []const u8) DecodeError!Image {
+pub fn decodeBuffer(allocator: std.mem.Allocator, buffer: []const u8) DecodeError!Image {
     if (buffer.len < Header.size)
         return error.InvalidData;
 
@@ -111,7 +111,7 @@ fn LimitedBufferedStream(comptime UnderlyingReader: type, comptime buffer_size: 
 }
 
 /// Decodes a QOI stream and returns the decoded image.
-pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) (DecodeError || @TypeOf(reader).Error)!Image {
+pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) (DecodeError || @TypeOf(reader).Error)!Image {
     var header_data: [Header.size]u8 = undefined;
     try reader.readNoEof(&header_data);
     const header = Header.decode(header_data) catch return error.InvalidData;
@@ -240,7 +240,7 @@ pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) (DecodeError
 pub const EncodeError = error{};
 
 /// Encodes a given `image` into a QOI buffer.
-pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
+pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
     var destination_buffer = std.ArrayList(u8).init(allocator);
     defer destination_buffer.deinit();
 
@@ -571,7 +571,7 @@ test "input fuzzer. plz do not crash" {
     var rng_engine = std.rand.DefaultPrng.init(0x1337);
     const rng = rng_engine.random();
 
-    var rounds: usize = 512;
+    var rounds: usize = 32;
     while (rounds > 0) {
         rounds -= 1;
         var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
@@ -591,7 +591,9 @@ test "input fuzzer. plz do not crash" {
             }).encode());
         }
 
-        if (decodeStream(std.testing.allocator, &input_buffer)) |*image| {
+        var stream = std.io.fixedBufferStream(&input_buffer);
+
+        if (decodeStream(std.testing.allocator, stream.reader())) |*image| {
             defer image.deinit(std.testing.allocator);
         } else |err| {
             // error is also okay, just no crashes plz

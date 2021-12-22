@@ -11,7 +11,7 @@ pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
 
     var cli = args_parser.parseForCurrentProcess(Cli, allocator, .print) catch return 1;
     defer cli.deinit();

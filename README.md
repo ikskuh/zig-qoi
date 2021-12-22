@@ -1,6 +1,6 @@
 # zig-qoi
 
-A implementation of the [_Quite-OK-Image_](https://phoboslab.org/log/2021/11/qoi-fast-lossless-image-compression) format for Zig.
+A implementation of the [_Quite OK Image Format_](https://qoiformat.org/) for Zig.
 
 ![](design/logo.png)
 
