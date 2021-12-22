@@ -243,16 +243,6 @@ pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) (std.mem.Al
 
 /// Encodes a given `image` into a QOI buffer.
 pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(writer).Error)!void {
-    const padding_size = 4; // arbitrary 4 bytes at the end of the file
-
-    // const QOI_INDEX: u8 = 0x00; // 00xxxxxx
-    // const QOI_RUN_8: u8 = 0x40; // 010xxxxx
-    // const QOI_RUN_16: u8 = 0x60; // 011xxxxx
-    // const QOI_DIFF_8: u8 = 0x80; // 10xxxxxx
-    // const QOI_DIFF_16: u8 = 0xc0; // 110xxxxx
-    // const QOI_DIFF_24: u8 = 0xe0; // 1110xxxx
-    // const QOI_COLOR: u8 = 0xf0; // 1111xxxx
-
     var format = for (image.pixels) |pix| {
         if (pix.a != 0xFF)
             break Format.rgba;
@@ -280,98 +270,83 @@ pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(
             run_length += 1;
         }
 
-        _ = i;
-        _ = color_lut;
+        if (run_length > 0 and (run_length == 62 or !same_pixel or (i == (image.pixels.len - 1)))) {
+            // QOI_OP_RUN
+            std.debug.assert(run_length >= 1 and run_length <= 62);
+            try writer.writeByte(0b1100_0000 | @truncate(u8, run_length - 1));
+            run_length = 0;
+        }
 
-        // if (run_length > 0 and (run_length == 0x2020 or !same_pixel or (i == (image.pixels.len - 1)))) {
-        //     // std.debug.print("write run of {} pixels at +{}\n", .{ run_length, destination_buffer.items.len });
-        //     // flush the run
-        //     if (run_length < 33) {
-        //         run_length -= 1;
-        //         try writer.writeByte(QOI_RUN_8 | @truncate(u6, run_length));
-        //     } else {
-        //         run_length -= 33;
-        //         try writer.writeByte(QOI_RUN_16 | @truncate(u5, run_length >> 8));
-        //         try writer.writeByte(@truncate(u8, run_length));
-        //     }
-        //     run_length = 0;
-        // }
+        if (!same_pixel) {
+            const hash = pixel.hash();
+            if (color_lut[hash].eql(pixel)) {
+                // QOI_OP_INDEX
+                try writer.writeByte(0b0000_0000 | hash);
+            } else {
+                color_lut[hash] = pixel;
 
-        // if (!same_pixel) {
-        //     const hash = pixel.hash();
-        //     if (color_lut[hash].eql(pixel)) {
-        //         // std.debug.print("write hash lookup to {} at +{}\n", .{ hash, destination_buffer.items.len });
-        //         try writer.writeByte(QOI_INDEX | hash);
-        //     } else {
-        //         color_lut[hash] = pixel;
-        //         const dr = @as(i9, pixel.r) - @as(i9, previous_pixel.r);
-        //         const dg = @as(i9, pixel.g) - @as(i9, previous_pixel.g);
-        //         const db = @as(i9, pixel.b) - @as(i9, previous_pixel.b);
-        //         const da = @as(i9, pixel.a) - @as(i9, previous_pixel.a);
+                const diff_r = @as(i16, pixel.r) - @as(i16, previous_pixel.r);
+                const diff_g = @as(i16, pixel.g) - @as(i16, previous_pixel.g);
+                const diff_b = @as(i16, pixel.b) - @as(i16, previous_pixel.b);
+                const diff_a = @as(i16, pixel.a) - @as(i16, previous_pixel.a);
 
-        //         // use delta encoding
-        //         if (da == 0 and inRange2(dr) and inRange2(dg) and inRange2(db)) {
-        //             // use delta encoding 8
-        //             // std.debug.print("write delta8({},{},{}) at +{}\n", .{ dr, dg, db, destination_buffer.items.len });
+                const diff_rg = diff_r - diff_g;
+                const diff_rb = diff_b - diff_g;
 
-        //             try writer.writeByte(QOI_DIFF_8 |
-        //                 (mapRange2(dr) << 4) |
-        //                 (mapRange2(dg) << 2) |
-        //                 (mapRange2(db) << 0));
-        //         } else if (da == 0 and inRange5(dr) and inRange4(dg) and inRange4(db)) {
-        //             // std.debug.print("write delta16({},{},{}) at +{}\n", .{ dr, dg, db, destination_buffer.items.len });
-        //             // use delta encoding 16
-        //             try writer.writeByte(QOI_DIFF_16 | mapRange5(dr));
-        //             try writer.writeByte((mapRange4(dg) << 4) | (mapRange4(db) << 0));
-        //         } else if (inRange5(dr) and inRange5(dg) and inRange5(db) and inRange5(da)) {
-        //             // std.debug.print("write delta24({},{},{},{}) at +{}\n", .{ dr, dg, db, da, destination_buffer.items.len });
-        //             // use delta encoding 24
-        //             const value = (@as(u24, QOI_DIFF_24) << 16) |
-        //                 (@as(u24, mapRange5(dr)) << 15) |
-        //                 (@as(u24, mapRange5(dg)) << 10) |
-        //                 (@as(u24, mapRange5(db)) << 5) |
-        //                 (@as(u24, mapRange5(da)) << 0);
-        //             try writer.writeByte(@truncate(u8, value >> 16));
-        //             try writer.writeByte(@truncate(u8, value >> 8));
-        //             try writer.writeByte(@truncate(u8, value >> 0));
-        //         } else {
-        //             // std.debug.print("write color({},{},{},{}) at +{}\n", .{ pixel.r, pixel.g, pixel.b, pixel.a, destination_buffer.items.len });
-        //             // use absolute encoding
-        //             const bitmask = QOI_COLOR |
-        //                 (if (dr != 0) @as(u8, 0b1000) else 0) |
-        //                 (if (dg != 0) @as(u8, 0b0100) else 0) |
-        //                 (if (db != 0) @as(u8, 0b0010) else 0) |
-        //                 (if (da != 0) @as(u8, 0b0001) else 0);
-
-        //             try writer.writeByte(bitmask);
-
-        //             if (dr != 0) {
-        //                 try writer.writeByte(pixel.r);
-        //             }
-        //             if (dg != 0) {
-        //                 try writer.writeByte(pixel.g);
-        //             }
-        //             if (db != 0) {
-        //                 try writer.writeByte(pixel.b);
-        //             }
-        //             if (da != 0) {
-        //                 try writer.writeByte(pixel.a);
-        //             }
-        //         }
-        //     }
-        // }
+                if (diff_a == 0 and inRange2(diff_r) and inRange2(diff_g) and inRange2(diff_b)) {
+                    // QOI_OP_DIFF
+                    const byte = 0b0100_0000 |
+                        (mapRange2(diff_r) << 4) |
+                        (mapRange2(diff_g) << 2) |
+                        (mapRange2(diff_b) << 0);
+                    try writer.writeByte(byte);
+                } else if (diff_a == 0 and inRange6(diff_g) and inRange4(diff_rg) and inRange4(diff_rb)) {
+                    // QOI_OP_LUMA
+                    try writer.writeAll(&[2]u8{
+                        0b1000_0000 | mapRange6(diff_g),
+                        (mapRange4(diff_rg) << 4) | (mapRange4(diff_rb) << 0),
+                    });
+                } else if (diff_a == 0) {
+                    // QOI_OP_RGB
+                    try writer.writeAll(&[4]u8{
+                        0b1111_1110,
+                        pixel.r,
+                        pixel.g,
+                        pixel.b,
+                    });
+                } else {
+                    // QOI_OP_RGBA
+                    try writer.writeAll(&[5]u8{
+                        0b1111_1111,
+                        pixel.r,
+                        pixel.g,
+                        pixel.b,
+                        pixel.a,
+                    });
+                }
+            }
+        }
     }
 
-    try writer.writeByteNTimes(0, padding_size);
+    try writer.writeAll(&[8]u8{
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+    });
 }
 
-fn mapRange2(val: i9) u8 {
+fn mapRange2(val: i16) u8 {
     return @intCast(u2, val + 2);
 }
-fn mapRange4(val: i9) u8 {
+fn mapRange4(val: i16) u8 {
     return @intCast(u4, val + 8);
 }
-fn mapRange6(val: i9) u8 {
+fn mapRange6(val: i16) u8 {
     return @intCast(u6, val + 32);
 }
 
@@ -385,14 +360,14 @@ fn unmapRange6(val: u32) i6 {
     return @intCast(i6, @as(i8, @truncate(u6, val)) - 32);
 }
 
-fn inRange2(val: i9) bool {
+fn inRange2(val: i16) bool {
     return (val >= -2) and (val <= 1);
 }
-fn inRange4(val: i9) bool {
+fn inRange4(val: i16) bool {
     return (val >= -8) and (val <= 7);
 }
-fn inRange5(val: i9) bool {
-    return (val >= -16) and (val <= 15);
+fn inRange6(val: i16) bool {
+    return (val >= -32) and (val <= 31);
 }
 
 fn add8(dst: *u8, diff: i8) void {
@@ -476,77 +451,77 @@ test "decode qoi file" {
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
-// test "encode qoi" {
-//     const src_data = @embedFile("../data/zero.raw");
+test "encode qoi" {
+    const src_data = @embedFile("../data/zero.raw");
 
-//     var dst_data = try encodeBuffer(std.testing.allocator, ConstImage{
-//         .width = 512,
-//         .height = 512,
-//         .pixels = std.mem.bytesAsSlice(Color, src_data),
-//         .colorspace = .sRGB,
-//     });
-//     defer std.testing.allocator.free(dst_data);
+    var dst_data = try encodeBuffer(std.testing.allocator, ConstImage{
+        .width = 512,
+        .height = 512,
+        .pixels = std.mem.bytesAsSlice(Color, src_data),
+        .colorspace = .sRGB,
+    });
+    defer std.testing.allocator.free(dst_data);
 
-//     const ref_data = @embedFile("../data/zero.qoi");
-//     try std.testing.expectEqualSlices(u8, ref_data, dst_data);
-// }
+    const ref_data = @embedFile("../data/zero.qoi");
+    try std.testing.expectEqualSlices(u8, ref_data, dst_data);
+}
 
-// test "random encode/decode" {
-//     var rng_engine = std.rand.DefaultPrng.init(0x1337);
-//     const rng = rng_engine.random();
+test "random encode/decode" {
+    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    const rng = rng_engine.random();
 
-//     const width = 251;
-//     const height = 49;
+    const width = 251;
+    const height = 49;
 
-//     var rounds: usize = 512;
-//     while (rounds > 0) {
-//         rounds -= 1;
-//         var input_buffer: [width * height]Color = undefined;
-//         rng.bytes(std.mem.sliceAsBytes(&input_buffer));
+    var rounds: usize = 512;
+    while (rounds > 0) {
+        rounds -= 1;
+        var input_buffer: [width * height]Color = undefined;
+        rng.bytes(std.mem.sliceAsBytes(&input_buffer));
 
-//         var encoded_data = try encodeBuffer(std.testing.allocator, ConstImage{
-//             .width = width,
-//             .height = height,
-//             .pixels = &input_buffer,
-//             .colorspace = if (rng.boolean()) Colorspace.sRGB else Colorspace.linear,
-//         });
-//         defer std.testing.allocator.free(encoded_data);
+        var encoded_data = try encodeBuffer(std.testing.allocator, ConstImage{
+            .width = width,
+            .height = height,
+            .pixels = &input_buffer,
+            .colorspace = if (rng.boolean()) Colorspace.sRGB else Colorspace.linear,
+        });
+        defer std.testing.allocator.free(encoded_data);
 
-//         var image = try decodeBuffer(std.testing.allocator, encoded_data);
-//         defer image.deinit(std.testing.allocator);
+        var image = try decodeBuffer(std.testing.allocator, encoded_data);
+        defer image.deinit(std.testing.allocator);
 
-//         try std.testing.expectEqual(@as(u32, width), image.width);
-//         try std.testing.expectEqual(@as(u32, height), image.height);
-//         try std.testing.expectEqualSlices(Color, &input_buffer, image.pixels);
-//     }
-// }
+        try std.testing.expectEqual(@as(u32, width), image.width);
+        try std.testing.expectEqual(@as(u32, height), image.height);
+        try std.testing.expectEqualSlices(Color, &input_buffer, image.pixels);
+    }
+}
 
-// test "input fuzzer. plz do not crash" {
-//     var rng_engine = std.rand.DefaultPrng.init(0x1337);
-//     const rng = rng_engine.random();
+test "input fuzzer. plz do not crash" {
+    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    const rng = rng_engine.random();
 
-//     var rounds: usize = 32;
-//     while (rounds > 0) {
-//         rounds -= 1;
-//         var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
-//         rng.bytes(&input_buffer);
+    var rounds: usize = 32;
+    while (rounds > 0) {
+        rounds -= 1;
+        var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
+        rng.bytes(&input_buffer);
 
-//         if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header
-//             std.mem.copy(u8, &input_buffer, &(Header{
-//                 .width = rng.int(u16),
-//                 .height = rng.int(u16),
-//                 .format = rng.enumValue(Format),
-//                 .colorspace = rng.enumValue(Colorspace),
-//             }).encode());
-//         }
+        if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header
+            std.mem.copy(u8, &input_buffer, &(Header{
+                .width = rng.int(u16),
+                .height = rng.int(u16),
+                .format = rng.enumValue(Format),
+                .colorspace = rng.enumValue(Colorspace),
+            }).encode());
+        }
 
-//         var stream = std.io.fixedBufferStream(&input_buffer);
+        var stream = std.io.fixedBufferStream(&input_buffer);
 
-//         if (decodeStream(std.testing.allocator, stream.reader())) |*image| {
-//             defer image.deinit(std.testing.allocator);
-//         } else |err| {
-//             // error is also okay, just no crashes plz
-//             err catch {};
-//         }
-//     }
-// }
+        if (decodeStream(std.testing.allocator, stream.reader())) |*image| {
+            defer image.deinit(std.testing.allocator);
+        } else |err| {
+            // error is also okay, just no crashes plz
+            err catch {};
+        }
+    }
+}
