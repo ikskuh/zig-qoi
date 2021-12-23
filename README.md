@@ -12,12 +12,25 @@ Add `src/qoi.zig` to your Zig project as a package.
 pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
 pub const EncodeError = error{ OutOfMemory };
 
-pub fn isQOI(bytes: []const u8) bool;
-pub fn decodeBuffer(allocator: *std.mem.Allocator, buffer: []const u8) DecodeError!Image;
-pub fn decodeStream(allocator: *std.mem.Allocator, reader: anytype) !Image;
+// Simple API:
 
-pub fn encodeBuffer(allocator: *std.mem.Allocator, image: ConstImage) EncodeError![]u8;
+pub fn isQOI(bytes: []const u8) bool;
+pub fn decodeBuffer(allocator: std.mem.Allocator, buffer: []const u8) DecodeError!Image;
+pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) !Image;
+
+pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) EncodeError![]u8;
 pub fn encodeStream(image: ConstImage, writer: anytype) !void;
+
+// Streaming API:
+pub fn encoder(writer: anytype) Encoder(@TypeOf(writer));
+pub fn Encoder(comptime Writer: type) type {
+   return struct {
+      writer: Writer,
+      pub fn reset(self: *Self) void;
+      pub fn flush(self: *Self) (EncodeError || Writer.Error)!void;
+      pub fn write(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void;
+   };
+}
 ```
 
 ## Implementation Status

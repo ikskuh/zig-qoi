@@ -56,6 +56,8 @@ pub fn isQOI(bytes: []const u8) bool {
 
 pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
 
+// pub fn decoder(reader: anytype) Decoder ( @TypeOf(
+
 /// Decodes a buffer containing a QOI image and returns the decoded image.
 pub fn decodeBuffer(allocator: std.mem.Allocator, buffer: []const u8) DecodeError!Image {
     if (buffer.len < Header.size)
@@ -231,6 +233,119 @@ pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) (DecodeError 
 
 pub const EncodeError = error{};
 
+/// Returns a raw qoi stream encoder that will receive pixel colors and write out bytes to a writer. This stream does not create a qoi header!
+pub fn encoder(writer: anytype) Encoder(@TypeOf(writer)) {
+    return .{ .writer = writer };
+}
+
+/// Returns a raw qoi stream encoder that will receive pixel colors and write out bytes to a writer. This stream does not create a qoi header!
+/// - `Writer` is the type of that writer
+pub fn Encoder(comptime Writer: type) type {
+    return struct {
+        const Self = @This();
+
+        pub const Error = Writer.Error || EncodeError;
+
+        // Set this to your writer:
+        writer: Writer,
+
+        // privates:
+        color_lut: [64]Color = std.mem.zeroes([64]Color),
+        previous_pixel: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0xFF },
+        run_length: usize = 0,
+
+        fn flushRun(self: *Self) !void { // QOI_OP_RUN
+            std.debug.assert(self.run_length >= 1 and self.run_length <= 62);
+            try self.writer.writeByte(0b1100_0000 | @truncate(u8, self.run_length - 1));
+            self.run_length = 0;
+        }
+
+        /// Resets the stream so it will start encoding from a clean slate. 
+        pub fn reset(self: *Self) void {
+            var writer = self.writer;
+            self.* = Self{ .writer = writer };
+        }
+
+        /// Flushes any left runs to the stream and will leave the stream in a "clean" state where a stream is terminated.
+        /// Does not reset the stream for a clean slate.
+        pub fn flush(self: *Self) (EncodeError || Writer.Error)!void {
+            if (self.run_length > 0) {
+                try self.flushRun();
+            }
+            std.debug.assert(self.run_length == 0);
+        }
+
+        /// Pushes a pixel into the stream. Might not write data if the pixel can be encoded as a run.
+        /// Call `flush` after encoding all pixels to make sure the stream is terminated properly.
+        pub fn write(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void {
+            defer self.previous_pixel = pixel;
+            const previous_pixel = self.previous_pixel;
+
+            const same_pixel = pixel.eql(self.previous_pixel);
+
+            if (same_pixel) {
+                self.run_length += 1;
+            }
+
+            if (self.run_length > 0 and (self.run_length == 62 or !same_pixel)) {
+                try self.flushRun();
+            }
+
+            if (same_pixel) {
+                return;
+            }
+
+            const hash = pixel.hash();
+            if (self.color_lut[hash].eql(pixel)) {
+                // QOI_OP_INDEX
+                try self.writer.writeByte(0b0000_0000 | hash);
+            } else {
+                self.color_lut[hash] = pixel;
+
+                const diff_r = @as(i16, pixel.r) - @as(i16, previous_pixel.r);
+                const diff_g = @as(i16, pixel.g) - @as(i16, previous_pixel.g);
+                const diff_b = @as(i16, pixel.b) - @as(i16, previous_pixel.b);
+                const diff_a = @as(i16, pixel.a) - @as(i16, previous_pixel.a);
+
+                const diff_rg = diff_r - diff_g;
+                const diff_rb = diff_b - diff_g;
+
+                if (diff_a == 0 and inRange2(diff_r) and inRange2(diff_g) and inRange2(diff_b)) {
+                    // QOI_OP_DIFF
+                    const byte = 0b0100_0000 |
+                        (mapRange2(diff_r) << 4) |
+                        (mapRange2(diff_g) << 2) |
+                        (mapRange2(diff_b) << 0);
+                    try self.writer.writeByte(byte);
+                } else if (diff_a == 0 and inRange6(diff_g) and inRange4(diff_rg) and inRange4(diff_rb)) {
+                    // QOI_OP_LUMA
+                    try self.writer.writeAll(&[2]u8{
+                        0b1000_0000 | mapRange6(diff_g),
+                        (mapRange4(diff_rg) << 4) | (mapRange4(diff_rb) << 0),
+                    });
+                } else if (diff_a == 0) {
+                    // QOI_OP_RGB
+                    try self.writer.writeAll(&[4]u8{
+                        0b1111_1110,
+                        pixel.r,
+                        pixel.g,
+                        pixel.b,
+                    });
+                } else {
+                    // QOI_OP_RGBA
+                    try self.writer.writeAll(&[5]u8{
+                        0b1111_1111,
+                        pixel.r,
+                        pixel.g,
+                        pixel.b,
+                        pixel.a,
+                    });
+                }
+            }
+        }
+    };
+}
+
 /// Encodes a given `image` into a QOI buffer.
 pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
     var destination_buffer = std.ArrayList(u8).init(allocator);
@@ -256,77 +371,11 @@ pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(
     };
     try writer.writeAll(&header.encode());
 
-    var color_lut = std.mem.zeroes([64]Color);
-
-    var previous_pixel = Color{ .r = 0, .g = 0, .b = 0, .a = 0xFF };
-    var run_length: usize = 0;
-
-    for (image.pixels) |pixel, i| {
-        defer previous_pixel = pixel;
-
-        const same_pixel = pixel.eql(previous_pixel);
-
-        if (same_pixel) {
-            run_length += 1;
-        }
-
-        if (run_length > 0 and (run_length == 62 or !same_pixel or (i == (image.pixels.len - 1)))) {
-            // QOI_OP_RUN
-            std.debug.assert(run_length >= 1 and run_length <= 62);
-            try writer.writeByte(0b1100_0000 | @truncate(u8, run_length - 1));
-            run_length = 0;
-        }
-
-        if (!same_pixel) {
-            const hash = pixel.hash();
-            if (color_lut[hash].eql(pixel)) {
-                // QOI_OP_INDEX
-                try writer.writeByte(0b0000_0000 | hash);
-            } else {
-                color_lut[hash] = pixel;
-
-                const diff_r = @as(i16, pixel.r) - @as(i16, previous_pixel.r);
-                const diff_g = @as(i16, pixel.g) - @as(i16, previous_pixel.g);
-                const diff_b = @as(i16, pixel.b) - @as(i16, previous_pixel.b);
-                const diff_a = @as(i16, pixel.a) - @as(i16, previous_pixel.a);
-
-                const diff_rg = diff_r - diff_g;
-                const diff_rb = diff_b - diff_g;
-
-                if (diff_a == 0 and inRange2(diff_r) and inRange2(diff_g) and inRange2(diff_b)) {
-                    // QOI_OP_DIFF
-                    const byte = 0b0100_0000 |
-                        (mapRange2(diff_r) << 4) |
-                        (mapRange2(diff_g) << 2) |
-                        (mapRange2(diff_b) << 0);
-                    try writer.writeByte(byte);
-                } else if (diff_a == 0 and inRange6(diff_g) and inRange4(diff_rg) and inRange4(diff_rb)) {
-                    // QOI_OP_LUMA
-                    try writer.writeAll(&[2]u8{
-                        0b1000_0000 | mapRange6(diff_g),
-                        (mapRange4(diff_rg) << 4) | (mapRange4(diff_rb) << 0),
-                    });
-                } else if (diff_a == 0) {
-                    // QOI_OP_RGB
-                    try writer.writeAll(&[4]u8{
-                        0b1111_1110,
-                        pixel.r,
-                        pixel.g,
-                        pixel.b,
-                    });
-                } else {
-                    // QOI_OP_RGBA
-                    try writer.writeAll(&[5]u8{
-                        0b1111_1111,
-                        pixel.r,
-                        pixel.g,
-                        pixel.b,
-                        pixel.a,
-                    });
-                }
-            }
-        }
+    var enc = encoder(writer);
+    for (image.pixels) |pixel| {
+        try enc.write(pixel);
     }
+    try enc.flush();
 
     try writer.writeAll(&[8]u8{
         0x00,
