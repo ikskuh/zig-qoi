@@ -1,6 +1,26 @@
 const std = @import("std");
 const logger = std.log.scoped(.qoi);
 
+pub const EncodeError = error{};
+pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
+
+/// Returns a raw qoi stream decoder that will fetch color runs from the qoi stream.
+pub fn decoder(reader: anytype) Decoder(@TypeOf(reader)) {
+    return .{ .reader = reader };
+}
+
+/// Returns a raw qoi stream encoder that will receive pixel colors and write out bytes to a writer. This stream does not create a qoi header!
+pub fn encoder(writer: anytype) Encoder(@TypeOf(writer)) {
+    return .{ .writer = writer };
+}
+
+/// A run of several pixels of the same color.
+pub const ColorRun = struct {
+    color: Color,
+    /// Is always greater than 0.
+    length: usize,
+};
+
 pub const Color = extern struct {
     r: u8,
     g: u8,
@@ -46,17 +66,13 @@ pub const ConstImage = struct {
     colorspace: Colorspace,
 };
 
-/// Returns true if `bytes` appear to contain a valid QOI image.
+/// Returns true if `bytes` appear to contain a valid QOI image from the header. This does not a in-depth analysis.
 pub fn isQOI(bytes: []const u8) bool {
     if (bytes.len < Header.size)
         return false;
     const header = Header.decode(bytes[0..Header.size].*) catch return false;
     return (bytes.len >= Header.size + header.size);
 }
-
-pub const DecodeError = error{ OutOfMemory, InvalidData, EndOfStream };
-
-// pub fn decoder(reader: anytype) Decoder ( @TypeOf(
 
 /// Decodes a buffer containing a QOI image and returns the decoded image.
 pub fn decodeBuffer(allocator: std.mem.Allocator, buffer: []const u8) DecodeError!Image {
@@ -66,53 +82,6 @@ pub fn decodeBuffer(allocator: std.mem.Allocator, buffer: []const u8) DecodeErro
     var stream = std.io.fixedBufferStream(buffer);
     return try decodeStream(allocator, stream.reader());
 }
-
-fn LimitedBufferedStream(comptime UnderlyingReader: type, comptime buffer_size: usize) type {
-    return struct {
-        const Self = @This();
-        const Error = UnderlyingReader.Error || error{EndOfStream};
-        const FifoType = std.fifo.LinearFifo(u8, std.fifo.LinearFifoBufferType{ .Static = buffer_size });
-
-        unbuffered_reader: UnderlyingReader,
-        limit: usize,
-        fifo: FifoType = FifoType.init(),
-
-        pub const Reader = std.io.Reader(*Self, Error, read);
-
-        pub fn reader(self: *Self) Reader {
-            return Reader{ .context = self };
-        }
-
-        pub fn read(self: *Self, dest: []u8) Error!usize {
-            var dest_index: usize = 0;
-            while (dest_index < dest.len) {
-                const written = self.fifo.read(dest[dest_index..]);
-                if (written == 0) {
-                    // fifo empty, fill it
-                    const writable = self.fifo.writableSlice(0);
-                    std.debug.assert(writable.len > 0);
-
-                    if (self.limit == 0)
-                        return error.EndOfStream;
-
-                    const max_data = std.math.min(self.limit, writable.len);
-                    const n = try self.unbuffered_reader.read(writable[0..max_data]);
-                    if (n == 0) {
-                        // reading from the unbuffered stream returned nothing
-                        // so we have nothing left to read.
-                        return dest_index;
-                    }
-                    self.limit -= n;
-                    self.fifo.update(n);
-                }
-                dest_index += written;
-            }
-            return dest.len;
-        }
-    };
-}
-
-const debug_decode_qoi_opcodes = false;
 
 /// Decodes a QOI stream and returns the decoded image.
 pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) (DecodeError || @TypeOf(reader).Error)!Image {
@@ -131,111 +100,69 @@ pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) (DecodeError 
     };
     errdefer allocator.free(img.pixels);
 
-    var current_color = Color{ .r = 0, .g = 0, .b = 0, .a = 0xFF };
-    var color_lut = std.mem.zeroes([64]Color);
+    var dec = decoder(reader);
 
     var index: usize = 0;
     while (index < img.pixels.len) {
-        var byte = try reader.readByte();
-
-        var new_color = current_color;
-        var count: usize = 1;
-
-        if (byte == 0b11111110) { // QOI_OP_RGB
-            new_color.r = try reader.readByte();
-            new_color.g = try reader.readByte();
-            new_color.b = try reader.readByte();
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0xFF, .g = 0x00, .b = 0x00 };
-            }
-        } else if (byte == 0b11111111) { // QOI_OP_RGBA
-            new_color.r = try reader.readByte();
-            new_color.g = try reader.readByte();
-            new_color.b = try reader.readByte();
-            new_color.a = try reader.readByte();
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0x00, .g = 0xFF, .b = 0x00 };
-            }
-        } else if (hasPrefix(byte, u2, 0b00)) { // QOI_OP_INDEX
-            const color_index = @truncate(u6, byte);
-            new_color = color_lut[color_index];
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0x00, .g = 0x00, .b = 0xFF };
-            }
-        } else if (hasPrefix(byte, u2, 0b01)) { // QOI_OP_DIFF
-            const diff_r = unmapRange2(byte >> 4);
-            const diff_g = unmapRange2(byte >> 2);
-            const diff_b = unmapRange2(byte >> 0);
-
-            add8(&new_color.r, diff_r);
-            add8(&new_color.g, diff_g);
-            add8(&new_color.b, diff_b);
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0xFF, .g = 0xFF, .b = 0x00 };
-            }
-        } else if (hasPrefix(byte, u2, 0b10)) { // QOI_OP_LUMA
-
-            const diff_g = unmapRange6(byte);
-
-            const diff_rg_rb = try reader.readByte();
-
-            const diff_rg = unmapRange4(diff_rg_rb >> 4);
-            const diff_rb = unmapRange4(diff_rg_rb >> 0);
-
-            const diff_r = @as(i8, diff_g) + diff_rg;
-            const diff_b = @as(i8, diff_g) + diff_rb;
-
-            add8(&new_color.r, diff_r);
-            add8(&new_color.g, diff_g);
-            add8(&new_color.b, diff_b);
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0xFF, .g = 0x00, .b = 0xFF };
-            }
-        } else if (hasPrefix(byte, u2, 0b11)) { // QOI_OP_RUN
-            count = @as(usize, @truncate(u6, byte)) + 1;
-            std.debug.assert(count >= 1 and count <= 62);
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0x00, .g = 0xFF, .b = 0xFF };
-            }
-        } else {
-            // we have covered all possibilities.
-            unreachable;
-        }
+        var run = try dec.fetch();
 
         // this will happen when a file has an invalid run length
         // and we would decode more pixels than there are in the image.
-        if (index + count > img.pixels.len) {
+        if (index + run.length > img.pixels.len) {
             return error.InvalidData;
         }
 
-        while (count > 0) {
-            count -= 1;
-            img.pixels[index] = new_color;
+        while (run.length > 0) {
+            run.length -= 1;
+            img.pixels[index] = run.color;
             index += 1;
-
-            if (debug_decode_qoi_opcodes) {
-                new_color = Color{ .r = 0x80, .g = 0x80, .b = 0x80 };
-            }
         }
-
-        color_lut[new_color.hash()] = new_color;
-        current_color = new_color;
     }
 
     return img;
 }
 
-pub const EncodeError = error{};
+/// Encodes a given `image` into a QOI buffer.
+pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
+    var destination_buffer = std.ArrayList(u8).init(allocator);
+    defer destination_buffer.deinit();
 
-/// Returns a raw qoi stream encoder that will receive pixel colors and write out bytes to a writer. This stream does not create a qoi header!
-pub fn encoder(writer: anytype) Encoder(@TypeOf(writer)) {
-    return .{ .writer = writer };
+    try encodeStream(image, destination_buffer.writer());
+
+    return destination_buffer.toOwnedSlice();
+}
+
+/// Encodes a given `image` into a QOI buffer.
+pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(writer).Error)!void {
+    var format = for (image.pixels) |pix| {
+        if (pix.a != 0xFF)
+            break Format.rgba;
+    } else Format.rgb;
+
+    var header = Header{
+        .width = image.width,
+        .height = image.height,
+        .format = format,
+        .colorspace = .sRGB,
+    };
+    try writer.writeAll(&header.encode());
+
+    var enc = encoder(writer);
+    for (image.pixels) |pixel| {
+        try enc.push(pixel);
+    }
+    try enc.flush();
+
+    try writer.writeAll(&[8]u8{
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+    });
 }
 
 /// Returns a raw qoi stream encoder that will receive pixel colors and write out bytes to a writer. This stream does not create a qoi header!
@@ -277,7 +204,7 @@ pub fn Encoder(comptime Writer: type) type {
 
         /// Pushes a pixel into the stream. Might not write data if the pixel can be encoded as a run.
         /// Call `flush` after encoding all pixels to make sure the stream is terminated properly.
-        pub fn write(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void {
+        pub fn push(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void {
             defer self.previous_pixel = pixel;
             const previous_pixel = self.previous_pixel;
 
@@ -346,47 +273,71 @@ pub fn Encoder(comptime Writer: type) type {
     };
 }
 
-/// Encodes a given `image` into a QOI buffer.
-pub fn encodeBuffer(allocator: std.mem.Allocator, image: ConstImage) (std.mem.Allocator.Error || EncodeError)![]u8 {
-    var destination_buffer = std.ArrayList(u8).init(allocator);
-    defer destination_buffer.deinit();
+/// A raw stream decoder for Qoi data streams. Will not decode file headers.
+pub fn Decoder(comptime Reader: type) type {
+    return struct {
+        const Self = @This();
 
-    try encodeStream(image, destination_buffer.writer());
+        reader: Reader,
 
-    return destination_buffer.toOwnedSlice();
-}
+        // private api:
+        current_color: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0xFF },
+        color_lut: [64]Color = std.mem.zeroes([64]Color),
 
-/// Encodes a given `image` into a QOI buffer.
-pub fn encodeStream(image: ConstImage, writer: anytype) (EncodeError || @TypeOf(writer).Error)!void {
-    var format = for (image.pixels) |pix| {
-        if (pix.a != 0xFF)
-            break Format.rgba;
-    } else Format.rgb;
+        /// Decodes the next `ColorRun` from the stream. For non-run commands, will return a run with length 1.
+        pub fn fetch(self: *Self) Reader.Error!ColorRun {
+            var byte = try self.reader.readByte();
 
-    var header = Header{
-        .width = image.width,
-        .height = image.height,
-        .format = format,
-        .colorspace = .sRGB,
+            var new_color = self.current_color;
+            var count: usize = 1;
+
+            if (byte == 0b11111110) { // QOI_OP_RGB
+                new_color.r = try self.reader.readByte();
+                new_color.g = try self.reader.readByte();
+                new_color.b = try self.reader.readByte();
+            } else if (byte == 0b11111111) { // QOI_OP_RGBA
+                new_color.r = try self.reader.readByte();
+                new_color.g = try self.reader.readByte();
+                new_color.b = try self.reader.readByte();
+                new_color.a = try self.reader.readByte();
+            } else if (hasPrefix(byte, u2, 0b00)) { // QOI_OP_INDEX
+                const color_index = @truncate(u6, byte);
+                new_color = self.color_lut[color_index];
+            } else if (hasPrefix(byte, u2, 0b01)) { // QOI_OP_DIFF
+                const diff_r = unmapRange2(byte >> 4);
+                const diff_g = unmapRange2(byte >> 2);
+                const diff_b = unmapRange2(byte >> 0);
+
+                add8(&new_color.r, diff_r);
+                add8(&new_color.g, diff_g);
+                add8(&new_color.b, diff_b);
+            } else if (hasPrefix(byte, u2, 0b10)) { // QOI_OP_LUMA
+
+                const diff_rg_rb = try self.reader.readByte();
+                const diff_rg = unmapRange4(diff_rg_rb >> 4);
+                const diff_rb = unmapRange4(diff_rg_rb >> 0);
+
+                const diff_g = unmapRange6(byte);
+                const diff_r = @as(i8, diff_g) + diff_rg;
+                const diff_b = @as(i8, diff_g) + diff_rb;
+
+                add8(&new_color.r, diff_r);
+                add8(&new_color.g, diff_g);
+                add8(&new_color.b, diff_b);
+            } else if (hasPrefix(byte, u2, 0b11)) { // QOI_OP_RUN
+                count = @as(usize, @truncate(u6, byte)) + 1;
+                std.debug.assert(count >= 1 and count <= 62);
+            } else {
+                // we have covered all possibilities.
+                unreachable;
+            }
+
+            self.color_lut[new_color.hash()] = new_color;
+            self.current_color = new_color;
+
+            return ColorRun{ .color = new_color, .length = count };
+        }
     };
-    try writer.writeAll(&header.encode());
-
-    var enc = encoder(writer);
-    for (image.pixels) |pixel| {
-        try enc.write(pixel);
-    }
-    try enc.flush();
-
-    try writer.writeAll(&[8]u8{
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x01,
-    });
 }
 
 fn mapRange2(val: i16) u8 {

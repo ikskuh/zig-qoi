@@ -28,7 +28,20 @@ pub fn Encoder(comptime Writer: type) type {
       writer: Writer,
       pub fn reset(self: *Self) void;
       pub fn flush(self: *Self) (EncodeError || Writer.Error)!void;
-      pub fn write(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void;
+      pub fn push(self: *Self, pixel: Color) (EncodeError || Writer.Error)!void;
+   };
+}
+
+pub const ColorRun = struct {
+   color: Color,
+   length: usize,
+};
+
+pub fn decoder(reader: anytype) Decoder(@TypeOf(reader));
+pub fn Decoder(comptime Reader: type) type {
+   return struct {
+      reader: Reader,
+      pub fn fetch(self: *Self) Reader.Error!ColorRun;
    };
 }
 ```
