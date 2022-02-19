@@ -285,7 +285,7 @@ pub fn Decoder(comptime Reader: type) type {
         color_lut: [64]Color = std.mem.zeroes([64]Color),
 
         /// Decodes the next `ColorRun` from the stream. For non-run commands, will return a run with length 1.
-        pub fn fetch(self: *Self) Reader.Error!ColorRun {
+        pub fn fetch(self: *Self) (Reader.Error || error{EndOfStream})!ColorRun {
             var byte = try self.reader.readByte();
 
             var new_color = self.current_color;

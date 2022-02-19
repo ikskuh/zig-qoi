@@ -16,7 +16,7 @@ fn perform(comptime test_encoder: bool) !void {
 
     var progress = std.Progress{};
 
-    const benchmark = try progress.start("Benchmark", total_rounds);
+    const benchmark = progress.start("Benchmark", total_rounds);
 
     var total_time: u64 = 0;
 
