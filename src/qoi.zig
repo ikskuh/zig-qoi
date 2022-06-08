@@ -90,7 +90,7 @@ pub fn decodeStream(allocator: std.mem.Allocator, reader: anytype) (DecodeError 
     const header = Header.decode(header_data) catch return error.InvalidData;
 
     const size_raw = @as(u64, header.width) * @as(u64, header.height);
-    const size = std.math.cast(usize, size_raw) catch return error.OutOfMemory;
+    const size = std.math.cast(usize, size_raw) orelse return error.OutOfMemory;
 
     var img = Image{
         .width = header.width,
@@ -187,7 +187,7 @@ pub fn Encoder(comptime Writer: type) type {
             self.run_length = 0;
         }
 
-        /// Resets the stream so it will start encoding from a clean slate. 
+        /// Resets the stream so it will start encoding from a clean slate.
         pub fn reset(self: *Self) void {
             var writer = self.writer;
             self.* = Self{ .writer = writer };
