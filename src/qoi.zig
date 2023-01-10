@@ -517,7 +517,8 @@ test "input fuzzer. plz do not crash" {
 
         var stream = std.io.fixedBufferStream(&input_buffer);
 
-        if (decodeStream(std.testing.allocator, stream.reader())) |*image| {
+        var image_or_err = decodeStream(std.testing.allocator, stream.reader());
+        if (image_or_err) |*image| {
             defer image.deinit(std.testing.allocator);
         } else |err| {
             // error is also okay, just no crashes plz
