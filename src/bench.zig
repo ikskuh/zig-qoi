@@ -11,8 +11,8 @@ pub fn main() !void {
 fn perform(comptime test_encoder: bool) !void {
     const allocator = std.heap.c_allocator;
 
-    const source_data = @embedFile("../data/zero.qoi");
-    const ref_data = @embedFile("../data/zero.raw");
+    const source_data = @embedFile("data/zero.qoi");
+    const ref_data = @embedFile("data/zero.raw");
 
     var progress = std.Progress{};
 

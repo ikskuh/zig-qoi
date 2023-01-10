@@ -423,7 +423,7 @@ pub const Format = enum(u8) {
 };
 
 test "decode qoi" {
-    const src_data = @embedFile("../data/zero.qoi");
+    const src_data = @embedFile("data/zero.qoi");
 
     var image = try decodeBuffer(std.testing.allocator, src_data);
     defer image.deinit(std.testing.allocator);
@@ -432,7 +432,7 @@ test "decode qoi" {
     try std.testing.expectEqual(@as(u32, 512), image.height);
     try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
 
-    const dst_data = @embedFile("../data/zero.raw");
+    const dst_data = @embedFile("data/zero.raw");
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
@@ -447,12 +447,12 @@ test "decode qoi file" {
     try std.testing.expectEqual(@as(u32, 512), image.height);
     try std.testing.expectEqual(@as(usize, 512 * 512), image.pixels.len);
 
-    const dst_data = @embedFile("../data/zero.raw");
+    const dst_data = @embedFile("data/zero.raw");
     try std.testing.expectEqualSlices(u8, dst_data, std.mem.sliceAsBytes(image.pixels));
 }
 
 test "encode qoi" {
-    const src_data = @embedFile("../data/zero.raw");
+    const src_data = @embedFile("data/zero.raw");
 
     var dst_data = try encodeBuffer(std.testing.allocator, ConstImage{
         .width = 512,
@@ -462,7 +462,7 @@ test "encode qoi" {
     });
     defer std.testing.allocator.free(dst_data);
 
-    const ref_data = @embedFile("../data/zero.qoi");
+    const ref_data = @embedFile("data/zero.qoi");
     try std.testing.expectEqualSlices(u8, ref_data, dst_data);
 }
 
