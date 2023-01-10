@@ -9,15 +9,15 @@ pub fn build(b: *std.build.Builder) void {
     converter.setTarget(target);
     converter.addPackage(.{
         .name = "args",
-        .path = .{ .path = "vendor/zig-args/args.zig" },
+        .source = .{ .path = "vendor/zig-args/args.zig" },
     });
     converter.addPackage(.{
         .name = "qoi",
-        .path = .{ .path = "src/qoi.zig" },
+        .source = .{ .path = "src/qoi.zig" },
     });
     converter.addPackage(.{
         .name = "img",
-        .path = .{ .path = "vendor/zigimg/zigimg.zig" },
+        .source = .{ .path = "vendor/zigimg/zigimg.zig" },
     });
     converter.install();
 
@@ -26,7 +26,7 @@ pub fn build(b: *std.build.Builder) void {
     benchmark.setTarget(target);
     benchmark.addPackage(.{
         .name = "args",
-        .path = .{ .path = "vendor/zig-args/args.zig" },
+        .source = .{ .path = "vendor/zig-args/args.zig" },
     });
     benchmark.linkLibC();
     benchmark.install();
@@ -36,15 +36,15 @@ pub fn build(b: *std.build.Builder) void {
     benchmark_files.setTarget(target);
     benchmark_files.addPackage(.{
         .name = "args",
-        .path = .{ .path = "vendor/zig-args/args.zig" },
+        .source = .{ .path = "vendor/zig-args/args.zig" },
     });
     benchmark_files.addPackage(.{
         .name = "qoi",
-        .path = .{ .path = "src/qoi.zig" },
+        .source = .{ .path = "src/qoi.zig" },
     });
     benchmark_files.addPackage(.{
         .name = "img",
-        .path = .{ .path = "vendor/zigimg/zigimg.zig" },
+        .source = .{ .path = "vendor/zigimg/zigimg.zig" },
     });
     benchmark_files.linkLibC();
     benchmark_files.install();
