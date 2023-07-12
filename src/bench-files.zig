@@ -24,12 +24,12 @@ pub fn main() !u8 {
     );
 
     for (cli.positionals) |folder_name| {
-        var folder = try std.fs.cwd().openDir(folder_name, .{ .iterate = true });
+        var folder = try std.fs.cwd().openIterableDir(folder_name, .{ .access_sub_paths = true });
         defer folder.close();
 
         var iterator = folder.iterate();
         while (try iterator.next()) |entry| {
-            if (entry.kind != .File) {
+            if (entry.kind != .file) {
                 continue;
             }
 
@@ -37,7 +37,7 @@ pub fn main() !u8 {
             if (!std.mem.eql(u8, ext, ".png"))
                 continue;
 
-            var file = try folder.openFile(entry.name, .{});
+            var file = try folder.dir.openFile(entry.name, .{});
             defer file.close();
 
             const png_size = (try file.stat()).size;
@@ -46,8 +46,8 @@ pub fn main() !u8 {
             defer raw_image.deinit();
 
             var image = qoi.Image{
-                .width = std.math.cast(u32, raw_image.width) catch continue,
-                .height = std.math.cast(u32, raw_image.height) catch continue,
+                .width = std.math.cast(u32, raw_image.width) orelse return error.Overflow,
+                .height = std.math.cast(u32, raw_image.height) orelse return error.Overflow,
                 .colorspace = .sRGB,
                 .pixels = try allocator.alloc(qoi.Color, raw_image.width * raw_image.height),
             };
@@ -56,12 +56,12 @@ pub fn main() !u8 {
                 var index: usize = 0;
                 var pixels = raw_image.iterator();
                 while (pixels.next()) |pix| {
-                    const rgba8 = pix.toIntegerColor8();
+                    const rgba8 = pix.toRgba32();
                     image.pixels[index] = .{
-                        .r = rgba8.R,
-                        .g = rgba8.G,
-                        .b = rgba8.B,
-                        .a = rgba8.A,
+                        .r = rgba8.r,
+                        .g = rgba8.g,
+                        .b = rgba8.b,
+                        .a = rgba8.a,
                     };
                     index += 1;
                 }
@@ -84,8 +84,8 @@ pub fn main() !u8 {
             total_decode_time += decode_time;
             total_encode_time += encode_time;
 
-            const png_rel_size = @intToFloat(f32, png_size) / @intToFloat(f32, raw_size);
-            const qoi_rel_size = @intToFloat(f32, qoi_size) / @intToFloat(f32, raw_size);
+            const png_rel_size = @as(f32, @floatFromInt(png_size)) / @as(f32, @floatFromInt(raw_size));
+            const qoi_rel_size = @as(f32, @floatFromInt(qoi_size)) / @as(f32, @floatFromInt(raw_size));
 
             const png_to_qoi_diff = qoi_rel_size / png_rel_size;
 
@@ -109,10 +109,10 @@ pub fn main() !u8 {
     std.debug.print("total sum\t0\t0\t{}\t{}\t{d:3.2}\t{}\t{d:3.2}\t{d}\t{}\t{}\n", .{
         total_raw_size,
         total_png_size,
-        @intToFloat(f32, total_png_size) / @intToFloat(f32, total_raw_size),
+        @as(f32, @floatFromInt(total_png_size)) / @as(f32, @floatFromInt(total_raw_size)),
         total_qoi_size,
-        @intToFloat(f32, total_qoi_size) / @intToFloat(f32, total_raw_size),
-        @intToFloat(f32, total_qoi_size) / @intToFloat(f32, total_png_size),
+        @as(f32, @floatFromInt(total_qoi_size)) / @as(f32, @floatFromInt(total_raw_size)),
+        @as(f32, @floatFromInt(total_qoi_size)) / @as(f32, @floatFromInt(total_png_size)),
         total_decode_time,
         total_encode_time,
     });
@@ -157,7 +157,7 @@ fn performBenchmark(comptime test_encoder: bool, qoi_data: []const u8, reference
                 return error.DecodingError;
         }
 
-        total_time += @intCast(u64, end_point - start_point);
+        total_time += @as(u64, @intCast(end_point - start_point));
     }
 
     return total_time / total_rounds;

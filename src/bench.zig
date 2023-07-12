@@ -57,7 +57,7 @@ fn perform(comptime test_encoder: bool) !void {
                 return error.DecodingError;
         }
 
-        total_time += @intCast(u64, end_point - start_point);
+        total_time += @as(u64, @intCast(end_point - start_point));
 
         benchmark.completeOne();
     }
