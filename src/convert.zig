@@ -38,8 +38,8 @@ pub fn main() !u8 {
         defer file.deinit();
 
         var image = qoi.Image{
-            .width = try std.math.cast(u32, file.width),
-            .height = try std.math.cast(u32, file.height),
+            .width = std.math.cast(u32, file.width) orelse return error.Overflow,
+            .height = std.math.cast(u32, file.height) orelse return error.Overflow,
             .colorspace = .sRGB,
             .pixels = try allocator.alloc(qoi.Color, file.width * file.height),
         };
@@ -48,12 +48,12 @@ pub fn main() !u8 {
         var iter = file.iterator();
         var index: usize = 0;
         while (iter.next()) |color| : (index += 1) {
-            const src_pix = color.toIntegerColor8();
+            const src_pix = color.toRgba32();
             image.pixels[index] = .{
-                .r = src_pix.R,
-                .g = src_pix.G,
-                .b = src_pix.B,
-                .a = src_pix.A,
+                .r = src_pix.r,
+                .g = src_pix.g,
+                .b = src_pix.b,
+                .a = src_pix.a,
             };
         }
 
@@ -96,31 +96,29 @@ pub fn main() !u8 {
             .allocator = undefined,
             .width = image.width,
             .height = image.height,
-            .pixels = img.color.ColorStorage{
-                .Rgba32 = @ptrCast([*]img.color.Rgba32, image.pixels.ptr)[0..image.pixels.len],
+            .pixels = img.color.PixelStorage{
+                .rgba32 = @as([*]img.color.Rgba32, @ptrCast(image.pixels.ptr))[0..image.pixels.len],
             },
         };
 
-        const fmt = if (std.ascii.eqlIgnoreCase(out_ext, ".bmp"))
-            img.ImageFormat.Bmp
+        const encoder_options = if (std.ascii.eqlIgnoreCase(out_ext, ".bmp"))
+            img.AllFormats.ImageEncoderOptions{ .bmp = {} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pbm"))
-            img.ImageFormat.Pbm
+            img.AllFormats.ImageEncoderOptions{ .pbm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pcx"))
-            img.ImageFormat.Pcx
+            img.AllFormats.ImageEncoderOptions{ .pcx = {} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pgm"))
-            img.ImageFormat.Pgm
+            img.AllFormats.ImageEncoderOptions{ .pgm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".png"))
-            img.ImageFormat.Png
+            img.AllFormats.ImageEncoderOptions{ .png = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".ppm"))
-            img.ImageFormat.Ppm
-        else if (std.ascii.eqlIgnoreCase(out_ext, ".raw"))
-            img.ImageFormat.Raw
+            img.AllFormats.ImageEncoderOptions{ .ppm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".tga"))
-            img.ImageFormat.Tga
+            img.AllFormats.ImageEncoderOptions{ .tga = {} }
         else
             return error.UnknownFormat;
 
-        try zigimg.writeToFile(&file, fmt, img.AllFormats.ImageEncoderOptions.None);
+        try zigimg.writeToFile(file, encoder_options);
     }
 
     return 0;
