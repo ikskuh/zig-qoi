@@ -391,8 +391,8 @@ pub const Header = struct {
         if (!std.mem.eql(u8, buffer[0..4], &correct_magic))
             return error.InvalidMagic;
         return Header{
-            .width = std.mem.readIntBig(u32, buffer[4..8]),
-            .height = std.mem.readIntBig(u32, buffer[8..12]),
+            .width = std.mem.readInt(u32, buffer[4..8], .big),
+            .height = std.mem.readInt(u32, buffer[8..12], .big),
             .format = try std.meta.intToEnum(Format, buffer[12]),
             .colorspace = try std.meta.intToEnum(Colorspace, buffer[13]),
         };
@@ -401,8 +401,8 @@ pub const Header = struct {
     fn encode(header: Header) [size]u8 {
         var result: [size]u8 = undefined;
         std.mem.copy(u8, result[0..4], &correct_magic);
-        std.mem.writeIntBig(u32, result[4..8], header.width);
-        std.mem.writeIntBig(u32, result[8..12], header.height);
+        std.mem.writeInt(u32, result[4..8], header.width, .big);
+        std.mem.writeInt(u32, result[8..12], header.height, .big);
         result[12] = @intFromEnum(header.format);
         result[13] = @intFromEnum(header.colorspace);
         return result;
