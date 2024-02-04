@@ -1,5 +1,3 @@
-// updated for zig version 0.12.0
-
 const std = @import("std");
 const logger = std.log.scoped(.qoi);
 
