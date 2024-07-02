@@ -14,8 +14,7 @@ fn perform(comptime test_encoder: bool) !void {
     const source_data = @embedFile("data/zero.qoi");
     const ref_data = @embedFile("data/zero.raw");
 
-    var progress = std.Progress{};
-
+    var progress = std.Progress.start(.{});
     const benchmark = progress.start("Benchmark", total_rounds);
 
     var total_time: u64 = 0;

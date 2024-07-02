@@ -24,7 +24,7 @@ pub fn main() !u8 {
     );
 
     for (cli.positionals) |folder_name| {
-        var folder = try std.fs.cwd().openIterableDir(folder_name, .{ .access_sub_paths = true });
+        var folder = try std.fs.cwd().openDir(folder_name, .{ .access_sub_paths = true });
         defer folder.close();
 
         var iterator = folder.iterate();
@@ -37,7 +37,7 @@ pub fn main() !u8 {
             if (!std.mem.eql(u8, ext, ".png"))
                 continue;
 
-            var file = try folder.dir.openFile(entry.name, .{});
+            var file = try folder.openFile(entry.name, .{});
             defer file.close();
 
             const png_size = (try file.stat()).size;
