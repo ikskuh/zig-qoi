@@ -467,7 +467,7 @@ test "encode qoi" {
 }
 
 test "random encode/decode" {
-    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    var rng_engine = std.Random.DefaultPrng.init(0x1337);
     const rng = rng_engine.random();
 
     const width = 251;
@@ -497,7 +497,7 @@ test "random encode/decode" {
 }
 
 test "input fuzzer. plz do not crash" {
-    var rng_engine = std.rand.DefaultPrng.init(0x1337);
+    var rng_engine = std.Random.DefaultPrng.init(0x1337);
     const rng = rng_engine.random();
 
     var rounds: usize = 32;
@@ -507,12 +507,13 @@ test "input fuzzer. plz do not crash" {
         rng.bytes(&input_buffer);
 
         if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header
-            @memcpy(&input_buffer, &(Header{
+            const header = (Header{
                 .width = rng.int(u16),
                 .height = rng.int(u16),
                 .format = rng.enumValue(Format),
                 .colorspace = rng.enumValue(Colorspace),
-            }).encode());
+            }).encode();
+            @memcpy(input_buffer[0..header.len], &header);
         }
 
         var stream = std.io.fixedBufferStream(&input_buffer);
