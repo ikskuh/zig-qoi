@@ -4,17 +4,17 @@ const qoi = @import("qoi.zig");
 const total_rounds = 4096;
 
 pub fn main() !void {
-    try perform(true);
-    try perform(false);
+    const progress = std.Progress.start(.{});
+    try perform(true, progress);
+    try perform(false, progress);
 }
 
-fn perform(comptime test_encoder: bool) !void {
+fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
     const allocator = std.heap.c_allocator;
 
     const source_data = @embedFile("data/zero.qoi");
     const ref_data = @embedFile("data/zero.raw");
 
-    var progress = std.Progress.start(.{});
     const benchmark = progress.start("Benchmark", total_rounds);
 
     var total_time: u64 = 0;
