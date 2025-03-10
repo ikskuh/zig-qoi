@@ -29,7 +29,6 @@ pub fn build(b: *std.Build) void {
     const argsb = b.addModule("args", .{ .root_source_file = b.path("vendor/zig-args/args.zig") });
     benchmark.root_module.addImport("args", argsb);
     benchmark.linkLibC();
-    b.installArtifact(benchmark);
 
     var benchmark_files = b.addExecutable(.{
         .name = "qoi-bench-files",
@@ -44,9 +43,8 @@ pub fn build(b: *std.Build) void {
     benchmark_files.root_module.addImport("qoi", bfqoi);
     benchmark_files.root_module.addImport("img", bfimg);
     benchmark_files.linkLibC();
-    b.installArtifact(benchmark_files);
 
-    const test_step = b.step("test", "Runs the test suite.");
+    const test_step = b.step("test", "Run the test suite");
     {
         const test_runner = b.addTest(.{
             .root_source_file = b.path("src/qoi.zig"),
@@ -56,9 +54,9 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&test_runner.step);
     }
 
-    const benchmark_step = b.step("benchmark", "Runs the benchmark.");
-    {
-        const runner = b.addRunArtifact(benchmark);
-        benchmark_step.dependOn(&runner.step);
-    }
+    const benchmark_step = b.step("benchmark", "Copy benchmark artifacts to prefix path");
+    benchmark_step.dependOn(&b.addInstallArtifact(benchmark, .{}).step);
+    benchmark_step.dependOn(&b.addInstallArtifact(benchmark_files, .{}).step);
+    const run_benchmark_step = b.step("run-benchmark", "Run the benchmark");
+    run_benchmark_step.dependOn(&b.addRunArtifact(benchmark).step);
 }
