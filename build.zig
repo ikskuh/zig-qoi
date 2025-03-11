@@ -3,6 +3,17 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const optimization = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
+    const qoi = b.addModule("qoi", .{
+        .root_source_file = b.path("src/qoi.zig"),
+        .target = target,
+        .optimize = optimization,
+    });
+    const args = b.dependency("args", .{}).module("args");
+    const img = b.dependency("img", .{}).module("zigimg");
+
+    const test_step = b.step("test", "Run the test suite");
+    const unit_tests = b.addTest(.{ .root_module = qoi });
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 
     const converter = b.addExecutable(.{
         .name = "qoi-convert",
@@ -11,9 +22,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimization,
     });
 
-    const args = b.addModule("args", .{ .root_source_file = b.path("vendor/zig-args/args.zig") });
-    const qoi = b.addModule("qoi", .{ .root_source_file = b.path("src/qoi.zig") });
-    const img = b.addModule("img", .{ .root_source_file = b.path("vendor/zigimg/zigimg.zig") });
     converter.root_module.addImport("args", args);
     converter.root_module.addImport("qoi", qoi);
     converter.root_module.addImport("img", img);
@@ -25,9 +33,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimization,
     });
-
-    const argsb = b.addModule("args", .{ .root_source_file = b.path("vendor/zig-args/args.zig") });
-    benchmark.root_module.addImport("args", argsb);
+    benchmark.root_module.addImport("args", args);
     benchmark.linkLibC();
 
     var benchmark_files = b.addExecutable(.{
@@ -36,23 +42,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimization,
     });
-    const bfargs = b.addModule("args", .{ .root_source_file = b.path("vendor/zig-args/args.zig") });
-    const bfqoi = b.addModule("qoi", .{ .root_source_file = b.path("src/qoi.zig") });
-    const bfimg = b.addModule("img", .{ .root_source_file = b.path("vendor/zigimg/zigimg.zig") });
-    benchmark_files.root_module.addImport("args", bfargs);
-    benchmark_files.root_module.addImport("qoi", bfqoi);
-    benchmark_files.root_module.addImport("img", bfimg);
+    benchmark_files.root_module.addImport("args", args);
+    benchmark_files.root_module.addImport("qoi", qoi);
+    benchmark_files.root_module.addImport("img", img);
     benchmark_files.linkLibC();
-
-    const test_step = b.step("test", "Run the test suite");
-    {
-        const test_runner = b.addTest(.{
-            .root_source_file = b.path("src/qoi.zig"),
-            .target = target,
-            .optimize = optimization,
-        });
-        test_step.dependOn(&test_runner.step);
-    }
 
     const benchmark_step = b.step("benchmark", "Copy benchmark artifacts to prefix path");
     benchmark_step.dependOn(&b.addInstallArtifact(benchmark, .{}).step);
