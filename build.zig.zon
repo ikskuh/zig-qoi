@@ -1,0 +1,23 @@
+.{
+    .name = .qoi,
+    .fingerprint = 0x7c7975e1f2a879e4,
+    .version = "0.1.0",
+    .dependencies = .{
+        .args = .{
+            .url = "git+https://github.com/ikskuh/zig-args#9425b94c103a031777fdd272c555ce93a7dea581",
+            .hash = "args-0.0.0-CiLiqv_NAAC97fGpk9hS2K681jkiqPsWP6w3ucb_ctGH",
+        },
+        .img = .{
+            .url = "git+https://github.com/zigimg/zigimg#0ce4eca3560d5553b13263d6b6bb72e146dd43d0",
+            .hash = "zigimg-0.1.0-lly-O4heEADSRxoTwJwrD3TBfUob9052sIgb9SL8Iz-A",
+        },
+    },
+    .minimum_zig_version = "0.14.0",
+    .paths = .{
+        "LICENCE",
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "src/qoi.zig",
+    },
+}

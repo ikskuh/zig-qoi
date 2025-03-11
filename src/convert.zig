@@ -102,19 +102,19 @@ pub fn main() !u8 {
         };
 
         const encoder_options = if (std.ascii.eqlIgnoreCase(out_ext, ".bmp"))
-            img.AllFormats.ImageEncoderOptions{ .bmp = .{} }
+            img.Image.EncoderOptions{ .bmp = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pbm"))
-            img.AllFormats.ImageEncoderOptions{ .pbm = .{} }
+            img.Image.EncoderOptions{ .pbm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pcx"))
-            img.AllFormats.ImageEncoderOptions{ .pcx = .{} }
+            img.Image.EncoderOptions{ .pcx = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".pgm"))
-            img.AllFormats.ImageEncoderOptions{ .pgm = .{} }
+            img.Image.EncoderOptions{ .pgm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".png"))
-            img.AllFormats.ImageEncoderOptions{ .png = .{} }
+            img.Image.EncoderOptions{ .png = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".ppm"))
-            img.AllFormats.ImageEncoderOptions{ .ppm = .{} }
+            img.Image.EncoderOptions{ .ppm = .{} }
         else if (std.ascii.eqlIgnoreCase(out_ext, ".tga"))
-            img.AllFormats.ImageEncoderOptions{ .tga = .{} }
+            img.Image.EncoderOptions{ .tga = .{} }
         else
             return error.UnknownFormat;
 
