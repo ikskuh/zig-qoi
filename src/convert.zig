@@ -8,7 +8,7 @@ const Cli = struct {
 };
 
 pub fn main() !u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
 
     const allocator = gpa.allocator();
@@ -26,16 +26,18 @@ pub fn main() !u8 {
     const in_ext = std.fs.path.extension(in_path);
     const out_ext = std.fs.path.extension(out_path);
 
+    var buf: [1024]u8 = undefined;
+
     var image = if (std.mem.eql(u8, in_ext, ".qoi")) blk: {
         var file = try std.fs.cwd().openFile(in_path, .{});
         defer file.close();
 
-        var buffered_stream = std.io.bufferedReader(file.reader());
+        var reader = file.reader(&buf);
 
-        break :blk try qoi.decodeStream(allocator, buffered_stream.reader());
+        break :blk try qoi.decodeStream(allocator, &reader.interface);
     } else blk: {
-        var file = try img.Image.fromFilePath(allocator, in_path);
-        defer file.deinit();
+        var file = try img.Image.fromFilePath(allocator, in_path, &buf);
+        defer file.deinit(allocator);
 
         var image = qoi.Image{
             .width = std.math.cast(u32, file.width) orelse return error.Overflow,
@@ -48,7 +50,7 @@ pub fn main() !u8 {
         var iter = file.iterator();
         var index: usize = 0;
         while (iter.next()) |color| : (index += 1) {
-            const src_pix = color.toRgba32();
+            const src_pix = color.to.color(img.color.Rgba32);
             image.pixels[index] = .{
                 .r = src_pix.r,
                 .g = src_pix.g,
@@ -70,16 +72,19 @@ pub fn main() !u8 {
 
         try file.writeAll(buffer);
     } else if (std.mem.eql(u8, out_ext, ".ppm")) { // portable pixmap
+        var writer = file.writer(&buf);
         // https://en.wikipedia.org/wiki/Netpbm#PPM_example
-        try file.writer().print("P6 {} {} 255\n", .{ image.width, image.height });
+        try writer.interface.print("P6 {} {} 255\n", .{ image.width, image.height });
         for (image.pixels) |pix| {
-            try file.writeAll(&[_]u8{
+            try writer.interface.writeAll(&[_]u8{
                 pix.r, pix.g, pix.b,
             });
         }
+        try writer.interface.flush();
     } else if (std.mem.eql(u8, out_ext, ".pam")) { // portable anymap
+        var writer = file.writer(&buf);
         // https://en.wikipedia.org/wiki/Netpbm#PAM_graphics_format
-        try file.writer().print(
+        try writer.interface.print(
             \\P7
             \\WIDTH {}
             \\HEIGHT {}
@@ -90,10 +95,10 @@ pub fn main() !u8 {
             \\
         , .{ image.width, image.height });
 
-        try file.writeAll(std.mem.sliceAsBytes(image.pixels));
+        try writer.interface.writeAll(std.mem.sliceAsBytes(image.pixels));
+        try writer.interface.flush();
     } else { // fallback impl
         var zigimg = img.Image{
-            .allocator = undefined,
             .width = image.width,
             .height = image.height,
             .pixels = img.color.PixelStorage{
@@ -118,7 +123,7 @@ pub fn main() !u8 {
         else
             return error.UnknownFormat;
 
-        try zigimg.writeToFile(file, encoder_options);
+        try zigimg.writeToFile(allocator, file, &buf, encoder_options);
     }
 
     return 0;

@@ -42,8 +42,9 @@ pub fn main() !u8 {
 
             const png_size = (try file.stat()).size;
 
-            var raw_image = try zigimg.Image.fromFile(allocator, &file);
-            defer raw_image.deinit();
+            var buf: [1024]u8 = undefined;
+            var raw_image = try zigimg.Image.fromFile(allocator, file, &buf);
+            defer raw_image.deinit(allocator);
 
             var image = qoi.Image{
                 .width = std.math.cast(u32, raw_image.width) orelse return error.Overflow,
@@ -56,7 +57,7 @@ pub fn main() !u8 {
                 var index: usize = 0;
                 var pixels = raw_image.iterator();
                 while (pixels.next()) |pix| {
-                    const rgba8 = pix.toRgba32();
+                    const rgba8 = pix.to.color(zigimg.color.Rgba32);
                     image.pixels[index] = .{
                         .r = rgba8.r,
                         .g = rgba8.g,

@@ -62,16 +62,16 @@ fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
     }
 
     if (test_encoder) {
-        std.debug.print("Encoding time for {} => {} bytes: {}\n", .{
+        std.debug.print("Encoding time for {} => {} bytes: {D}\n", .{
             ref_data.len,
             source_data.len,
-            std.fmt.fmtDuration(total_time / total_rounds),
+            total_time / total_rounds,
         });
     } else {
-        std.debug.print("Decoding time for {} => {} bytes: {}\n", .{
+        std.debug.print("Decoding time for {} => {} bytes: {D}\n", .{
             source_data.len,
             ref_data.len,
-            std.fmt.fmtDuration(total_time / total_rounds),
+            total_time / total_rounds,
         });
     }
 }

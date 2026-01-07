@@ -17,35 +17,46 @@ pub fn build(b: *std.Build) void {
 
     const converter = b.addExecutable(.{
         .name = "qoi-convert",
-        .root_source_file = b.path("src/convert.zig"),
-        .target = target,
-        .optimize = optimization,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/convert.zig"),
+            .target = target,
+            .optimize = optimization,
+            .imports = &.{
+                .{ .name = "args", .module = args },
+                .{ .name = "qoi", .module = qoi },
+                .{ .name = "img", .module = img },
+            },
+        }),
     });
-
-    converter.root_module.addImport("args", args);
-    converter.root_module.addImport("qoi", qoi);
-    converter.root_module.addImport("img", img);
     b.installArtifact(converter);
 
-    var benchmark = b.addExecutable(.{
+    const benchmark = b.addExecutable(.{
         .name = "qoi-bench",
-        .root_source_file = b.path("src/bench.zig"),
-        .target = target,
-        .optimize = optimization,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/bench.zig"),
+            .target = target,
+            .optimize = optimization,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "args", .module = args },
+            },
+        }),
     });
-    benchmark.root_module.addImport("args", args);
-    benchmark.linkLibC();
 
-    var benchmark_files = b.addExecutable(.{
+    const benchmark_files = b.addExecutable(.{
         .name = "qoi-bench-files",
-        .root_source_file = b.path("src/bench-files.zig"),
-        .target = target,
-        .optimize = optimization,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/bench-files.zig"),
+            .target = target,
+            .optimize = optimization,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "args", .module = args },
+                .{ .name = "qoi", .module = qoi },
+                .{ .name = "img", .module = img },
+            },
+        }),
     });
-    benchmark_files.root_module.addImport("args", args);
-    benchmark_files.root_module.addImport("qoi", qoi);
-    benchmark_files.root_module.addImport("img", img);
-    benchmark_files.linkLibC();
 
     const benchmark_step = b.step("benchmark", "Copy benchmark artifacts to prefix path");
     benchmark_step.dependOn(&b.addInstallArtifact(benchmark, .{}).step);
