@@ -4,15 +4,15 @@
     .version = "0.1.0",
     .dependencies = .{
         .args = .{
-            .url = "git+https://github.com/ikskuh/zig-args#e060ac80c244e9675471b6d213b22ddc83cc8f98",
-            .hash = "args-0.0.0-CiLiqo_RAADz2TiHUzG5-0Mk7IZHR-h1SZgUrb_k4c7d",
+            .url = "git+https://github.com/ikskuh/zig-args#f96f325f664d4ee2cd56a17ad135b331ecb65d98",
+            .hash = "args-0.0.0-CiLiqmvgAADyJmrzcQTP9IOYNvTzR_KGrg3ZNNsH2Qv0",
         },
         .img = .{
-            .url = "git+https://github.com/zigimg/zigimg#eab2522c023b9259db8b13f2f90d609b7437e5f6",
-            .hash = "zigimg-0.1.0-8_eo2vUZFgAAtN1c6dAO5DdqL0d4cEWHtn6iR5ucZJti",
+            .url = "git+https://github.com/zigimg/zigimg#84210734425d7d87fe9ff4417b32776b94a496c3",
+            .hash = "zigimg-0.1.0-8_eo2sKcFwA_kUjxZ0A4V2XdgC3u77TfQMDJys9tvF6r",
         },
     },
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .paths = .{
         "LICENCE",
         "README.md",

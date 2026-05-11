@@ -3,13 +3,13 @@ const qoi = @import("qoi.zig");
 
 const total_rounds = 4096;
 
-pub fn main() !void {
-    const progress = std.Progress.start(.{});
-    try perform(true, progress);
-    try perform(false, progress);
+pub fn main(init: std.process.Init) !void {
+    const progress = std.Progress.start(init.io, .{});
+    try perform(true, init.io, progress);
+    try perform(false, init.io, progress);
 }
 
-fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
+fn perform(comptime test_encoder: bool, io: std.Io, progress: std.Progress.Node) !void {
     const allocator = std.heap.c_allocator;
 
     const source_data = @embedFile("data/zero.qoi");
@@ -23,11 +23,11 @@ fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
     while (rounds > 0) {
         rounds -= 1;
 
-        var start_point: i128 = undefined;
-        var end_point: i128 = undefined;
+        var start_point: std.Io.Timestamp = undefined;
+        var end_point: std.Io.Timestamp = undefined;
 
         if (test_encoder) {
-            start_point = std.time.nanoTimestamp();
+            start_point = .now(io, .real);
 
             const memory = try qoi.encodeBuffer(allocator, qoi.ConstImage{
                 .width = 512,
@@ -37,17 +37,17 @@ fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
             });
             defer allocator.free(memory);
 
-            end_point = std.time.nanoTimestamp();
+            end_point = .now(io, .real);
 
             if (!std.mem.eql(u8, source_data, memory))
                 return error.EncodingError;
         } else {
-            start_point = std.time.nanoTimestamp();
+            start_point = .now(io, .real);
 
             var image = try qoi.decodeBuffer(allocator, source_data);
             defer image.deinit(allocator);
 
-            end_point = std.time.nanoTimestamp();
+            end_point = .now(io, .real);
 
             if (image.width != 512 or image.height != 512)
                 return error.DecodingError;
@@ -56,22 +56,22 @@ fn perform(comptime test_encoder: bool, progress: std.Progress.Node) !void {
                 return error.DecodingError;
         }
 
-        total_time += @as(u64, @intCast(end_point - start_point));
+        total_time += @intCast(start_point.durationTo(end_point).toNanoseconds());
 
         benchmark.completeOne();
     }
 
     if (test_encoder) {
-        std.debug.print("Encoding time for {} => {} bytes: {D}\n", .{
+        std.debug.print("Encoding time for {} => {} bytes: {f}\n", .{
             ref_data.len,
             source_data.len,
-            total_time / total_rounds,
+            std.Io.Duration.fromNanoseconds(total_time / total_rounds),
         });
     } else {
-        std.debug.print("Decoding time for {} => {} bytes: {D}\n", .{
+        std.debug.print("Decoding time for {} => {} bytes: {f}\n", .{
             source_data.len,
             ref_data.len,
-            total_time / total_rounds,
+            std.Io.Duration.fromNanoseconds(total_time / total_rounds),
         });
     }
 }

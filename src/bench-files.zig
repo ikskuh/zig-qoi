@@ -5,10 +5,11 @@ const qoi = @import("qoi.zig");
 
 const total_rounds = 8;
 
-pub fn main() !u8 {
+pub fn main(init: std.process.Init) !u8 {
     const allocator = std.heap.c_allocator; // for perf
+    const io = init.io;
 
-    var cli = args_parser.parseForCurrentProcess(struct {}, allocator, .print) catch return 1;
+    var cli = args_parser.parseForCurrentProcess(struct {}, init, .print) catch return 1;
     defer cli.deinit();
 
     var total_raw_size: u64 = 0;
@@ -24,11 +25,11 @@ pub fn main() !u8 {
     );
 
     for (cli.positionals) |folder_name| {
-        var folder = try std.fs.cwd().openDir(folder_name, .{ .access_sub_paths = true });
-        defer folder.close();
+        var folder = try std.Io.Dir.cwd().openDir(io, folder_name, .{ .access_sub_paths = true });
+        defer folder.close(io);
 
         var iterator = folder.iterate();
-        while (try iterator.next()) |entry| {
+        while (try iterator.next(io)) |entry| {
             if (entry.kind != .file) {
                 continue;
             }
@@ -37,13 +38,13 @@ pub fn main() !u8 {
             if (!std.mem.eql(u8, ext, ".png"))
                 continue;
 
-            var file = try folder.openFile(entry.name, .{});
-            defer file.close();
+            var file = try folder.openFile(io, entry.name, .{});
+            defer file.close(io);
 
-            const png_size = (try file.stat()).size;
+            const png_size = (try file.stat(io)).size;
 
             var buf: [1024]u8 = undefined;
-            var raw_image = try zigimg.Image.fromFile(allocator, file, &buf);
+            var raw_image = try zigimg.Image.fromFile(allocator, io, file, &buf);
             defer raw_image.deinit(allocator);
 
             var image = qoi.Image{
@@ -72,8 +73,8 @@ pub fn main() !u8 {
             const reference_qoi = try qoi.encodeBuffer(allocator, image.asConst());
             defer allocator.free(reference_qoi);
 
-            const decode_time = try performBenchmark(false, reference_qoi, image.asConst());
-            const encode_time = try performBenchmark(true, reference_qoi, image.asConst());
+            const decode_time = try performBenchmark(false, io, reference_qoi, image.asConst());
+            const encode_time = try performBenchmark(true, io, reference_qoi, image.asConst());
 
             const raw_size = @sizeOf(qoi.Color) * image.pixels.len;
             const qoi_size = reference_qoi.len;
@@ -121,7 +122,7 @@ pub fn main() !u8 {
     return 0;
 }
 
-fn performBenchmark(comptime test_encoder: bool, qoi_data: []const u8, reference_image: qoi.ConstImage) !u64 {
+fn performBenchmark(comptime test_encoder: bool, io: std.Io, qoi_data: []const u8, reference_image: qoi.ConstImage) !u64 {
     const allocator = std.heap.c_allocator;
 
     var total_time: u64 = 0;
@@ -134,22 +135,22 @@ fn performBenchmark(comptime test_encoder: bool, qoi_data: []const u8, reference
         var end_point: i128 = undefined;
 
         if (test_encoder) {
-            start_point = std.time.nanoTimestamp();
+            start_point = std.Io.Clock.real.now(io).toNanoseconds();
 
             const memory = try qoi.encodeBuffer(allocator, reference_image);
             defer allocator.free(memory);
 
-            end_point = std.time.nanoTimestamp();
+            end_point = std.Io.Clock.real.now(io).toNanoseconds();
 
             if (!std.mem.eql(u8, qoi_data, memory))
                 return error.EncodingError;
         } else {
-            start_point = std.time.nanoTimestamp();
+            start_point = std.Io.Clock.real.now(io).toNanoseconds();
 
             var image = try qoi.decodeBuffer(allocator, qoi_data);
             defer image.deinit(allocator);
 
-            end_point = std.time.nanoTimestamp();
+            end_point = std.Io.Clock.real.now(io).toNanoseconds();
 
             if (image.width != reference_image.width or image.height != reference_image.height)
                 return error.DecodingError;
@@ -158,7 +159,7 @@ fn performBenchmark(comptime test_encoder: bool, qoi_data: []const u8, reference
                 return error.DecodingError;
         }
 
-        total_time += @as(u64, @intCast(end_point - start_point));
+        total_time += @intCast(end_point - start_point);
     }
 
     return total_time / total_rounds;
