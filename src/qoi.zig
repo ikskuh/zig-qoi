@@ -435,11 +435,12 @@ test "decode qoi" {
 }
 
 test "decode qoi file" {
-    var file = try std.fs.cwd().openFile("data/zero.qoi", .{});
-    defer file.close();
+    const io = std.testing.io;
+    var file = try std.Io.Dir.cwd().openFile(io, "data/zero.qoi", .{});
+    defer file.close(io);
 
     var buf: [1024]u8 = undefined;
-    var reader = file.reader(&buf);
+    var reader = file.reader(io, &buf);
     var image = try decodeStream(std.testing.allocator, &reader.interface);
     defer image.deinit(std.testing.allocator);
 
@@ -501,9 +502,9 @@ test "input fuzzer. plz do not crash" {
     const rng = rng_engine.random();
 
     var rounds: usize = 32;
+    var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
     while (rounds > 0) {
         rounds -= 1;
-        var input_buffer: [1 << 20]u8 = undefined; // perform on a 1 MB buffer
         rng.bytes(&input_buffer);
 
         if ((rounds % 4) != 0) { // 25% is fully random 75% has a correct looking header

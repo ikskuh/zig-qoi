@@ -7,13 +7,11 @@ const Cli = struct {
     help: bool = false,
 };
 
-pub fn main() !u8 {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    const allocator = gpa.allocator();
-
-    var cli = args_parser.parseForCurrentProcess(Cli, allocator, .print) catch return 1;
+    var cli = args_parser.parseForCurrentProcess(Cli, init, .print) catch return 1;
     defer cli.deinit();
 
     if (cli.positionals.len != 2) {
@@ -29,17 +27,17 @@ pub fn main() !u8 {
     var buf: [1024]u8 = undefined;
 
     var image = if (std.mem.eql(u8, in_ext, ".qoi")) blk: {
-        var file = try std.fs.cwd().openFile(in_path, .{});
-        defer file.close();
+        var file = try std.Io.Dir.cwd().openFile(io, in_path, .{});
+        defer file.close(io);
 
-        var reader = file.reader(&buf);
+        var reader = file.reader(io, &buf);
 
         break :blk try qoi.decodeStream(allocator, &reader.interface);
     } else blk: {
-        var file = try img.Image.fromFilePath(allocator, in_path, &buf);
+        var file = try img.Image.fromFilePath(allocator, io, in_path, &buf);
         defer file.deinit(allocator);
 
-        var image = qoi.Image{
+        var image: qoi.Image = .{
             .width = std.math.cast(u32, file.width) orelse return error.Overflow,
             .height = std.math.cast(u32, file.height) orelse return error.Overflow,
             .colorspace = .sRGB,
@@ -63,16 +61,16 @@ pub fn main() !u8 {
     };
     defer image.deinit(allocator);
 
-    var file = try std.fs.cwd().createFile(out_path, .{});
-    defer file.close();
+    var file = try std.Io.Dir.cwd().createFile(io, out_path, .{});
+    defer file.close(io);
 
     if (std.mem.eql(u8, out_ext, ".qoi")) {
         const buffer = try qoi.encodeBuffer(allocator, image.asConst());
         defer allocator.free(buffer);
 
-        try file.writeAll(buffer);
+        try file.writeStreamingAll(io, buffer);
     } else if (std.mem.eql(u8, out_ext, ".ppm")) { // portable pixmap
-        var writer = file.writer(&buf);
+        var writer = file.writer(io, &buf);
         // https://en.wikipedia.org/wiki/Netpbm#PPM_example
         try writer.interface.print("P6 {} {} 255\n", .{ image.width, image.height });
         for (image.pixels) |pix| {
@@ -82,7 +80,7 @@ pub fn main() !u8 {
         }
         try writer.interface.flush();
     } else if (std.mem.eql(u8, out_ext, ".pam")) { // portable anymap
-        var writer = file.writer(&buf);
+        var writer = file.writer(io, &buf);
         // https://en.wikipedia.org/wiki/Netpbm#PAM_graphics_format
         try writer.interface.print(
             \\P7
@@ -123,7 +121,7 @@ pub fn main() !u8 {
         else
             return error.UnknownFormat;
 
-        try zigimg.writeToFile(allocator, file, &buf, encoder_options);
+        try zigimg.writeToFile(allocator, io, file, &buf, encoder_options);
     }
 
     return 0;
